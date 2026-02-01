@@ -7,7 +7,7 @@ FastAPI endpoints for account management, automation, and GeeLark integration.
 import os
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from loguru import logger
 
@@ -368,6 +368,130 @@ async def full_automation_setup(
     )
     
     return FullSetupResponse(**result)
+
+
+@router.post("/accounts/full-setup-async", tags=["Accounts"])
+async def full_automation_setup_async(
+    data: FullSetupRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    geelark: GeeLarkClient = Depends(get_geelark_client)
+):
+    """
+    🚀 ASYNC Zero-touch automation - Returns immediately with task_id.
+    
+    Use GET /tasks/{task_id} to poll for progress.
+    
+    This endpoint returns instantly and runs the full setup in the background:
+    1. Create an Android 15 cloud phone with the proxy
+    2. Install TikTok
+    3. Create a TikTok account with natural credentials
+    4. Store credentials securely
+    5. Start the warmup process
+    """
+    from app.services.task_tracker import create_task, update_task, TaskStatus
+    
+    # Create task immediately
+    task_id = create_task("magic_setup", {
+        "proxy_string": data.proxy_string[:50] + "..." if len(data.proxy_string) > 50 else data.proxy_string,
+        "name_prefix": data.name_prefix
+    })
+    
+    # Run in background
+    background_tasks.add_task(
+        run_magic_setup_background,
+        task_id=task_id,
+        proxy_string=data.proxy_string,
+        name_prefix=data.name_prefix,
+        max_retries=data.max_retries,
+        db=db,
+        geelark=geelark
+    )
+    
+    return {
+        "task_id": task_id,
+        "status": "started",
+        "message": "Magic Setup launched! Poll /tasks/{task_id} for progress."
+    }
+
+
+def run_magic_setup_background(
+    task_id: str,
+    proxy_string: str,
+    name_prefix: str,
+    max_retries: int,
+    db: Session,
+    geelark: GeeLarkClient
+):
+    """Background worker for Magic Setup."""
+    from app.services.task_tracker import update_task, TaskStatus
+    from app.services.account_manager import AccountManager
+    
+    try:
+        update_task(task_id, status=TaskStatus.RUNNING, progress=5, current_step="Initializing...")
+        
+        manager = AccountManager(db, geelark)
+        
+        def status_callback(step: str, progress: int):
+            update_task(task_id, progress=progress, current_step=step, step_complete=step)
+        
+        result = manager.full_automation_setup(
+            proxy_string=proxy_string,
+            name_prefix=name_prefix,
+            max_username_retries=max_retries,
+            status_callback=status_callback
+        )
+        
+        if result.get("success"):
+            update_task(
+                task_id,
+                status=TaskStatus.COMPLETE,
+                progress=100,
+                current_step="Complete!",
+                result=result
+            )
+        else:
+            update_task(
+                task_id,
+                status=TaskStatus.FAILED,
+                progress=100,
+                current_step="Failed",
+                error=result.get("error", "Unknown error"),
+                result=result
+            )
+    
+    except Exception as e:
+        logger.error(f"Background Magic Setup failed: {e}")
+        update_task(
+            task_id,
+            status=TaskStatus.FAILED,
+            error=str(e),
+            current_step="Error occurred"
+        )
+
+
+@router.get("/tasks/{task_id}", tags=["Tasks"])
+async def get_task_status(task_id: str):
+    """
+    Get the status of a background task.
+    
+    Poll this endpoint every 3-5 seconds to get real-time progress.
+    """
+    from app.services.task_tracker import get_task
+    
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    return task
+
+
+@router.get("/tasks", tags=["Tasks"])
+async def list_tasks(limit: int = 20):
+    """Get recent background tasks."""
+    from app.services.task_tracker import get_all_tasks
+    
+    return {"tasks": get_all_tasks(limit)}
 
 
 @router.get("/credentials", response_model=List[CredentialResponse], tags=["Accounts"])

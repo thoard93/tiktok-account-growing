@@ -166,6 +166,21 @@ def api_post(endpoint: str, data: dict = None):
         return None
 
 
+def api_post_long(endpoint: str, data: dict = None):
+    """Make POST request with extended timeout for long-running operations like Magic Setup."""
+    try:
+        # 5-minute timeout for operations like phone creation + TikTok install + account creation
+        response = requests.post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=300)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.Timeout:
+        st.error("⏳ Operation is taking longer than expected. Check the 📊 Logs page for progress.")
+        return None
+    except Exception as e:
+        st.error(f"API Error: {e}")
+        return None
+
+
 # ===========================
 # Sidebar Navigation
 # ===========================
@@ -269,50 +284,100 @@ elif page == "✨ Magic Setup":
     with col2:
         name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
     
+    # Initialize session state for task tracking
+    if "magic_task_id" not in st.session_state:
+        st.session_state.magic_task_id = None
+    if "magic_complete" not in st.session_state:
+        st.session_state.magic_complete = False
+    
+    # Launch button
     if st.button("🚀 Launch Magic Setup", type="primary", use_container_width=True):
         if not proxy_string:
             st.warning("Please enter a proxy string")
         else:
-            # Show progress
-            with st.status("🔮 Running automation...", expanded=True) as status:
-                st.write("📡 Sending request to API...")
+            # Start async task
+            result = api_post("/accounts/full-setup-async", {
+                "proxy_string": proxy_string,
+                "name_prefix": name_prefix or "",
+                "max_retries": 5
+            })
+            
+            if result and result.get("task_id"):
+                st.session_state.magic_task_id = result["task_id"]
+                st.session_state.magic_complete = False
+                st.rerun()
+    
+    # Show progress if task is running
+    if st.session_state.magic_task_id and not st.session_state.magic_complete:
+        task_id = st.session_state.magic_task_id
+        
+        # Poll for status
+        import time
+        
+        st.markdown("---")
+        st.subheader("🔮 Magic Setup Progress")
+        
+        status_container = st.empty()
+        progress_bar = st.progress(0)
+        steps_container = st.empty()
+        
+        # Get current status
+        task_status = api_get(f"/tasks/{task_id}")
+        
+        if task_status:
+            progress = task_status.get("progress", 0)
+            current_step = task_status.get("current_step", "Working...")
+            status = task_status.get("status", "running")
+            
+            # Update UI
+            progress_bar.progress(progress)
+            status_container.markdown(f"**Status:** {status.upper()} | **Current:** {current_step}")
+            
+            # Show completed steps
+            steps = task_status.get("steps_completed", [])
+            if steps:
+                step_text = "\n".join([f"✅ {s['step']}" for s in steps[-5:]])  # Last 5 steps
+                steps_container.markdown(step_text)
+            
+            if status == "complete":
+                st.session_state.magic_complete = True
+                st.balloons()
                 
-                result = api_post("/accounts/full-setup", {
-                    "proxy_string": proxy_string,
-                    "name_prefix": name_prefix or "",
-                    "max_retries": 5
-                })
+                result = task_status.get("result", {})
+                st.success(f"""
+                🎉 **Account Created Successfully!**
+                - Account ID: `{result.get('account_id')}`
+                - Phone ID: `{result.get('phone_id')}`
+                """)
                 
-                if result:
-                    # Show steps
-                    for step in result.get("steps_completed", []):
-                        icon = "✅" if step["status"] == "complete" else "🔄" if step["status"] == "running" else "❌"
-                        st.write(f"{icon} {step['step']}")
-                    
-                    if result.get("success"):
-                        status.update(label="✅ Setup Complete!", state="complete")
-                        
-                        st.balloons()
-                        
-                        st.success(f"""
-                        **Account Created Successfully!**
-                        - Account ID: `{result.get('account_id')}`
-                        - Phone ID: `{result.get('phone_id')}`
-                        """)
-                        
-                        if result.get("credentials"):
-                            creds = result["credentials"]
-                            st.info(f"""
-                            **Credentials (also saved to secure vault)**
-                            - Username: `{creds['username']}`
-                            - Email: `{creds['email']}`
-                            - Password: `{creds['password']}`
-                            """)
-                    else:
-                        status.update(label="❌ Setup Failed", state="error")
-                        st.error(f"Error: {result.get('error')}")
-                else:
-                    status.update(label="❌ API Error", state="error")
+                if result.get("credentials"):
+                    creds = result["credentials"]
+                    st.info(f"""
+                    **Credentials (saved to vault)**
+                    - Username: `{creds.get('username')}`
+                    - Email: `{creds.get('email')}`
+                    - Password: `{creds.get('password')}`
+                    """)
+                
+                # Reset button
+                if st.button("🔄 Start Another"):
+                    st.session_state.magic_task_id = None
+                    st.session_state.magic_complete = False
+                    st.rerun()
+            
+            elif status == "failed":
+                st.session_state.magic_complete = True
+                st.error(f"❌ **Setup Failed:** {task_status.get('error', 'Unknown error')}")
+                
+                if st.button("🔄 Try Again"):
+                    st.session_state.magic_task_id = None
+                    st.session_state.magic_complete = False
+                    st.rerun()
+            
+            else:
+                # Still running - auto-refresh in 3 seconds
+                time.sleep(3)
+                st.rerun()
     
     st.markdown("---")
     st.caption("💡 Tip: Use static residential proxies for best results. Each proxy should be unique.")
