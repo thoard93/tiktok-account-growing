@@ -619,38 +619,111 @@ elif page == "🌐 Proxies":
 # ===========================
 
 elif page == "📊 Logs":
-    st.title("Activity Logs")
+    st.title("📊 Activity Logs & Status")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        account_filter = st.number_input("Filter by Account ID", min_value=0, value=0)
-    with col2:
-        action_filter = st.selectbox(
-            "Filter by Action",
-            ["All", "account_created", "warmup_started", "warmup_session", 
-             "warmup_completed", "video_posted", "phone_started", "phone_stopped"]
-        )
+    # Real-time Status Overview
+    st.subheader("🔄 System Status")
     
-    endpoint = "/logs?"
-    if account_filter > 0:
-        endpoint += f"account_id={account_filter}&"
-    if action_filter != "All":
-        endpoint += f"action_type={action_filter}&"
+    # Get quick stats
+    stats = api_get("/dashboard/stats")
+    if stats:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("🔥 Warming Up", stats.get("warming_up", 0))
+        with col2:
+            st.metric("✅ Active", stats.get("active", 0))
+        with col3:
+            st.metric("📱 Phones", stats.get("total_accounts", 0))
+        with col4:
+            st.metric("🚫 Banned", stats.get("banned", 0))
     
-    logs = api_get(endpoint.rstrip("?&"))
+    st.markdown("---")
     
-    if logs and logs["items"]:
-        for log in logs["items"]:
-            status = "✅" if log["success"] else "❌"
-            st.markdown(f"""
-            **{status} {log['action_type']}** - Account #{log['account_id']}  
-            *{log['created_at'][:19]}*
-            """)
-            if log.get("error_message"):
-                st.error(f"Error: {log['error_message']}")
-            st.markdown("---")
-    else:
-        st.info("No logs found.")
+    # Tabs for different log views
+    tab1, tab2 = st.tabs(["📋 Activity Feed", "⚠️ Errors Only"])
+    
+    with tab1:
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            account_filter = st.number_input("Account ID (0 = all)", min_value=0, value=0)
+        with col2:
+            action_filter = st.selectbox(
+                "Action Type",
+                ["All", "account_created", "full_setup_started", "full_setup_completed",
+                 "warmup_started", "warmup_session", "warmup_completed", 
+                 "phone_stopped_after_warmup", "phone_started", "phone_stopped",
+                 "video_posted", "ban_detected", "account_recovered", "phone_recreated"]
+            )
+        with col3:
+            if st.button("🔄 Refresh"):
+                st.rerun()
+        
+        endpoint = "/logs?limit=50&"
+        if account_filter > 0:
+            endpoint += f"account_id={account_filter}&"
+        if action_filter != "All":
+            endpoint += f"action_type={action_filter}&"
+        
+        logs = api_get(endpoint.rstrip("?&"))
+        
+        if logs and logs.get("items"):
+            for log in logs["items"]:
+                # Color-coded status icons
+                if log["success"]:
+                    if "completed" in log["action_type"]:
+                        icon = "🎉"
+                    elif "started" in log["action_type"]:
+                        icon = "🚀"
+                    elif "stopped" in log["action_type"]:
+                        icon = "⏹️"
+                    elif "warmup" in log["action_type"]:
+                        icon = "🔥"
+                    else:
+                        icon = "✅"
+                else:
+                    icon = "❌"
+                
+                # Format the log entry
+                timestamp = log['created_at'][:19].replace('T', ' ')
+                
+                with st.container():
+                    st.markdown(f"""
+                    **{icon} {log['action_type'].replace('_', ' ').title()}** - Account #{log['account_id']}  
+                    🕐 *{timestamp}*
+                    """)
+                    
+                    # Show action details if available
+                    if log.get("action_details"):
+                        details = log["action_details"]
+                        if isinstance(details, dict):
+                            detail_str = " | ".join([f"**{k}**: {v}" for k, v in details.items() if v is not None][:4])
+                            if detail_str:
+                                st.caption(detail_str)
+                    
+                    if log.get("error_message"):
+                        st.error(f"⚠️ {log['error_message']}")
+                    
+                    st.markdown("---")
+        else:
+            st.info("No activity logs yet. Start a Magic Setup to see logs here!")
+    
+    with tab2:
+        st.subheader("⚠️ Recent Errors")
+        
+        error_logs = api_get("/logs?success=false&limit=20")
+        
+        if error_logs and error_logs.get("items"):
+            for log in error_logs["items"]:
+                timestamp = log['created_at'][:19].replace('T', ' ')
+                
+                st.error(f"""
+                **❌ {log['action_type']}** - Account #{log['account_id']}  
+                🕐 {timestamp}  
+                **Error:** {log.get('error_message', 'Unknown error')}
+                """)
+                st.markdown("---")
+        else:
+            st.success("🎉 No errors! Everything is running smoothly.")
 
 
 # ===========================
