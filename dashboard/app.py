@@ -20,20 +20,42 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Premium Dark Mode
+# Custom CSS - Premium Dark Mode with High Contrast Text
 st.markdown("""
 <style>
-    /* Premium Dark Theme */
+    /* Premium Dark Theme with Readable Text */
     .stApp {
         background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+        color: #ffffff !important;
+    }
+    
+    /* Force all text to be white/light */
+    .stApp, .stApp p, .stApp span, .stApp div, .stApp label, 
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stMarkdown, .stMarkdown p, .stText, [data-testid="stMarkdownContainer"] {
+        color: #ffffff !important;
+    }
+    
+    /* Sidebar text */
+    [data-testid="stSidebar"], [data-testid="stSidebar"] * {
+        color: #ffffff !important;
+    }
+    
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
     }
     
     .stMetric {
         background: linear-gradient(145deg, #1e1e3f, #252550);
         padding: 20px;
         border-radius: 16px;
-        border: 1px solid rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    
+    .stMetric label, .stMetric [data-testid="stMetricValue"], 
+    .stMetric [data-testid="stMetricLabel"] {
+        color: #ffffff !important;
     }
     
     .magic-card {
@@ -43,25 +65,47 @@ st.markdown("""
         border: 1px solid rgba(99, 102, 241, 0.3);
         box-shadow: 0 8px 32px rgba(99, 102, 241, 0.15);
         margin: 20px 0;
+        color: #ffffff !important;
     }
     
-    .success-glow {
-        animation: glow 2s ease-in-out infinite alternate;
+    .magic-card h3, .magic-card ol, .magic-card li {
+        color: #ffffff !important;
     }
     
-    @keyframes glow {
-        from { box-shadow: 0 0 10px #00ff88; }
-        to { box-shadow: 0 0 30px #00ff88; }
+    .magic-card strong {
+        color: #a5b4fc !important;
     }
     
-    .status-active { color: #00ff88; font-weight: bold; }
-    .status-warming { color: #ffc107; font-weight: bold; }
-    .status-banned { color: #ff4757; font-weight: bold; }
-    .status-paused { color: #747d8c; font-weight: bold; }
+    /* Input fields */
+    .stTextInput input, .stSelectbox select, .stTextArea textarea {
+        background-color: #252550 !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255,255,255,0.2) !important;
+    }
+    
+    .stTextInput label, .stSelectbox label, .stTextArea label {
+        color: #ffffff !important;
+    }
+    
+    /* Dataframes/Tables */
+    .stDataFrame, .stTable {
+        color: #ffffff !important;
+    }
+    
+    [data-testid="stDataFrame"] {
+        background: #1a1a3e;
+    }
+    
+    /* Status colors */
+    .status-active { color: #00ff88 !important; font-weight: bold; }
+    .status-warming { color: #ffc107 !important; font-weight: bold; }
+    .status-banned { color: #ff4757 !important; font-weight: bold; }
+    .status-paused { color: #a0a0a0 !important; font-weight: bold; }
     
     /* Button styling */
     .stButton > button {
-        background: linear-gradient(90deg, #6366f1, #8b5cf6);
+        background: linear-gradient(90deg, #6366f1, #8b5cf6) !important;
+        color: #ffffff !important;
         border: none;
         border-radius: 12px;
         padding: 12px 24px;
@@ -69,8 +113,28 @@ st.markdown("""
     }
     
     .stButton > button:hover {
-        background: linear-gradient(90deg, #8b5cf6, #a855f7);
+        background: linear-gradient(90deg, #8b5cf6, #a855f7) !important;
         transform: translateY(-2px);
+    }
+    
+    /* Success/Error/Warning messages */
+    .stSuccess, .stError, .stWarning, .stInfo {
+        color: #ffffff !important;
+    }
+    
+    /* Radio buttons */
+    .stRadio label {
+        color: #ffffff !important;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab"] {
+        color: #ffffff !important;
+    }
+    
+    /* Expander */
+    .streamlit-expanderHeader {
+        color: #ffffff !important;
     }
 </style>
 """, unsafe_allow_html=True)
