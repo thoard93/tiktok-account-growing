@@ -439,7 +439,7 @@ def run_magic_setup_background(
             proxy_string=proxy_string,
             name_prefix=name_prefix,
             max_username_retries=max_retries,
-            status_callback=status_callback
+            callback=status_callback
         )
         
         if result.get("success"):
