@@ -496,25 +496,29 @@ class AccountManager:
                 logger.info(f"Phone status poll: success={status_response.success}, data={status_response.data}")
                 
                 if status_response.success and status_response.data:
-                    # Response format: {'data': [{'id': '...', 'openStatus': 0}]}
                     phone_data = status_response.data
-                    if isinstance(phone_data, dict) and 'data' in phone_data:
-                        phone_list = phone_data.get('data', [])
-                        if phone_list and len(phone_list) > 0:
-                            status = phone_list[0].get('openStatus')
-                            logger.info(f"Phone status check: openStatus={status}")
-                            if status == 0:  # 0 = Started
-                                phone_ready = True
-                                break
-                            elif status == 3:  # Expired
-                                raise Exception("Phone expired during boot")
-                    # Also check if data is directly a list (different response format)
+                    status = None
+                    
+                    # Check successDetails format (actual GeeLark response)
+                    if isinstance(phone_data, dict) and 'successDetails' in phone_data:
+                        details_list = phone_data.get('successDetails', [])
+                        if details_list and len(details_list) > 0:
+                            status = details_list[0].get('status')
+                    # Fallback: check data format
+                    elif isinstance(phone_data, dict) and 'data' in phone_data:
+                        data_list = phone_data.get('data', [])
+                        if data_list and len(data_list) > 0:
+                            status = data_list[0].get('openStatus') or data_list[0].get('status')
+                    # Fallback: direct list
                     elif isinstance(phone_data, list) and len(phone_data) > 0:
-                        status = phone_data[0].get('openStatus')
-                        logger.info(f"Phone status check (list format): openStatus={status}")
-                        if status == 0:
-                            phone_ready = True
-                            break
+                        status = phone_data[0].get('openStatus') or phone_data[0].get('status')
+                    
+                    logger.info(f"Phone status check: status={status}")
+                    if status == 0:  # 0 = Started
+                        phone_ready = True
+                        break
+                    elif status == 3:  # Expired
+                        raise Exception("Phone expired during boot")
 
             
             if not phone_ready:
