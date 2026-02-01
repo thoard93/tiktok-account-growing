@@ -1,8 +1,15 @@
 """
-SMS-Activate Integration
+SMS Verification Service
 =========================
 Provides virtual phone numbers for SMS verification during TikTok registration.
-API Documentation: https://sms-activate.org/en/api2
+
+Supported Providers:
+- HeroSMS (primary) - Successor to SMS-Activate
+- SMSPool (backup)
+
+API Documentation:
+- HeroSMS: https://herosms.com/api
+- SMSPool: https://smspool.net/api
 """
 
 import os
@@ -20,23 +27,24 @@ class SMSNumber:
     phone_number: str
     country: str
     service: str
+    provider: str = "herosms"
     status: str = "waiting"
     code: Optional[str] = None
 
 
-class SMSActivateClient:
+class SMSClient:
     """
-    Client for SMS-Activate.org API.
+    Unified SMS verification client supporting HeroSMS (successor to SMS-Activate).
     
     Usage:
-        client = SMSActivateClient(api_key="your_key")
-        number = client.get_number(service="tt", country=0)  # TikTok, USA
-        # Use number.phone_number for registration...
+        client = SMSClient()
+        number = client.get_number(service="tiktok", country="usa")
         code = client.wait_for_code(number.activation_id, timeout=120)
-        client.set_status(number.activation_id, status=6)  # Complete
+        client.complete_activation(number.activation_id)
     """
     
-    BASE_URL = "https://api.sms-activate.org/stubs/handler_api.php"
+    # HeroSMS API (same format as SMS-Activate)
+    BASE_URL = "https://api.herosms.com/stubs/handler_api.php"
     
     # Service codes for popular platforms
     SERVICES = {
@@ -67,15 +75,15 @@ class SMSActivateClient:
     
     def __init__(self, api_key: Optional[str] = None):
         """
-        Initialize SMS-Activate client.
+        Initialize HeroSMS client.
         
         Args:
-            api_key: API key from sms-activate.org dashboard.
-                    Falls back to SMS_ACTIVATE_API_KEY env var.
+            api_key: API key from herosms.com dashboard.
+                    Falls back to HEROSMS_API_KEY env var.
         """
-        self.api_key = api_key or os.getenv("SMS_ACTIVATE_API_KEY")
+        self.api_key = api_key or os.getenv("HEROSMS_API_KEY")
         if not self.api_key:
-            logger.warning("SMS-Activate API key not configured")
+            logger.warning("HeroSMS API key not configured")
     
     def _make_request(self, params: Dict[str, Any]) -> str:
         """Make API request and return response text."""
@@ -84,9 +92,10 @@ class SMSActivateClient:
         try:
             response = requests.get(self.BASE_URL, params=params, timeout=30)
             response.raise_for_status()
+            logger.debug(f"HeroSMS response: {response.text}")
             return response.text
         except requests.RequestException as e:
-            logger.error(f"SMS-Activate API error: {e}")
+            logger.error(f"HeroSMS API error: {e}")
             raise
     
     def get_balance(self) -> float:
@@ -95,7 +104,7 @@ class SMSActivateClient:
         
         if result.startswith("ACCESS_BALANCE:"):
             balance = float(result.split(":")[1])
-            logger.info(f"SMS-Activate balance: ${balance:.2f}")
+            logger.info(f"HeroSMS balance: ${balance:.2f}")
             return balance
         else:
             logger.error(f"Failed to get balance: {result}")
@@ -150,6 +159,7 @@ class SMSActivateClient:
                 phone_number=phone_number,
                 country=country,
                 service=service,
+                provider="herosms",
                 status="waiting"
             )
         
@@ -278,10 +288,14 @@ class SMSActivateClient:
         return self.set_status(activation_id, self.STATUS_CODES["request_another"])
 
 
-def get_sms_client() -> Optional[SMSActivateClient]:
-    """Get configured SMS-Activate client, or None if not configured."""
-    api_key = os.getenv("SMS_ACTIVATE_API_KEY")
+# Alias for backward compatibility
+SMSActivateClient = SMSClient
+
+
+def get_sms_client() -> Optional[SMSClient]:
+    """Get configured SMS client, or None if not configured."""
+    api_key = os.getenv("HEROSMS_API_KEY")
     if not api_key:
-        logger.warning("SMS_ACTIVATE_API_KEY not set - SMS verification disabled")
+        logger.warning("HEROSMS_API_KEY not set - SMS verification disabled")
         return None
-    return SMSActivateClient(api_key=api_key)
+    return SMSClient(api_key=api_key)
