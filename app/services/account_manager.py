@@ -568,14 +568,26 @@ class AccountManager:
                 
                 for attempt in range(max_username_retries):
                     try:
-                        # Request virtual phone number for TikTok
-                        update_status(f"Getting SMS number (attempt {attempt + 1})")
-                        sms_number = sms_client.get_number(service="tiktok", country="usa")
+                        # Try multiple countries in order of preference
+                        # USA > UK > Indonesia > Philippines > Kazakhstan > Russia
+                        countries_to_try = ["usa", "uk", "indonesia", "philippines", "kazakhstan", "russia"]
+                        sms_number = None
+                        
+                        for country in countries_to_try:
+                            update_status(f"Getting SMS number ({country.upper()}, attempt {attempt + 1})")
+                            sms_number = sms_client.get_number(service="tiktok", country=country)
+                            
+                            if sms_number:
+                                logger.info(f"Got number from {country}: {sms_number.phone_number}")
+                                break
+                            else:
+                                logger.warning(f"No TikTok numbers available in {country}")
                         
                         if not sms_number:
-                            logger.warning(f"Failed to get SMS number, attempt {attempt + 1}")
-                            time.sleep(5)
+                            logger.warning(f"No TikTok numbers in any country, attempt {attempt + 1}")
+                            time.sleep(10)  # Wait longer before retry
                             continue
+
                         
                         logger.info(f"Got SMS number: {sms_number.phone_number}")
                         

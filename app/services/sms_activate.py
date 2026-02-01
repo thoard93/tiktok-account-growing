@@ -57,14 +57,21 @@ class SMSClient:
         "whatsapp": "wa",
     }
     
-    # Country codes
+    # Country codes (from HeroSMS API - use getCountries to verify)
+    # Note: USA is typically country 12, but may vary
     COUNTRIES = {
-        "usa": 12,
-        "uk": 16,
-        "canada": 36,
-        "russia": 0,
-        "any": 0,
+        "usa": 12,        # United States
+        "uk": 16,         # United Kingdom
+        "canada": 36,     # Canada
+        "russia": 0,      # Russia (default)
+        "kazakhstan": 2,  # Kazakhstan (cheap)
+        "ukraine": 1,     # Ukraine
+        "indonesia": 6,   # Indonesia (often available)
+        "india": 22,      # India
+        "philippines": 4, # Philippines
+        "any": 0,         # Any available country
     }
+
     
     # Status codes for setStatus
     STATUS_CODES = {
