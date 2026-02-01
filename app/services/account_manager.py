@@ -548,11 +548,10 @@ class AccountManager:
                 
                 # Use GeeLark's login/registration RPA
                 login_response = self.geelark.run_tiktok_login(
-                    phone_id=phone_id,
-                    login_type=1,  # Email registration
-                    email=email,
-                    password=password
+                    phone_ids=[phone_id],
+                    credentials=[{"email": email, "password": password}]
                 )
+
                 
                 if login_response.success:
                     credentials = {
@@ -819,11 +818,10 @@ class AccountManager:
                 username, email, password = generate_credentials()
                 
                 login_response = self.geelark.run_tiktok_login(
-                    phone_id=account.geelark_profile_id,
-                    login_type=1,
-                    email=email,
-                    password=password
+                    phone_ids=[account.geelark_profile_id],
+                    credentials=[{"email": email, "password": password}]
                 )
+
                 
                 if login_response.success:
                     # Create new account record
