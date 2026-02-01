@@ -493,6 +493,8 @@ class AccountManager:
                 update_status(f"Waiting for phone to boot ({waited}s)")
                 
                 status_response = self.geelark.get_phone_status([phone_id])
+                logger.info(f"Phone status poll: success={status_response.success}, data={status_response.data}")
+                
                 if status_response.success and status_response.data:
                     # Response format: {'data': [{'id': '...', 'openStatus': 0}]}
                     phone_data = status_response.data
@@ -506,6 +508,14 @@ class AccountManager:
                                 break
                             elif status == 3:  # Expired
                                 raise Exception("Phone expired during boot")
+                    # Also check if data is directly a list (different response format)
+                    elif isinstance(phone_data, list) and len(phone_data) > 0:
+                        status = phone_data[0].get('openStatus')
+                        logger.info(f"Phone status check (list format): openStatus={status}")
+                        if status == 0:
+                            phone_ready = True
+                            break
+
             
             if not phone_ready:
                 raise Exception(f"Phone did not start within {max_wait} seconds")
