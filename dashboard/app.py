@@ -275,105 +275,29 @@ elif page == "✨ Magic Setup":
     
     st.markdown("---")
     
-    # Input form
-    # Initialize session state for task tracking (at top of page)
-    if "magic_task_id" not in st.session_state:
-        st.session_state.magic_task_id = None
-    if "magic_complete" not in st.session_state:
-        st.session_state.magic_complete = False
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        proxy_string = st.text_input(
-            "🌐 Proxy String",
-            placeholder="socks5://user:pass@1.2.3.4:1337  or  host:port:user:pass",
-            help="Supports multiple formats: protocol://user:pass@host:port or host:port:user:pass"
-        )
-    
-    with col2:
-        name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
-    
-    # Show progress if task is running (BEFORE the button to prevent blocking)
-    if st.session_state.magic_task_id and not st.session_state.magic_complete:
-        task_id = st.session_state.magic_task_id
-        
-        st.markdown("---")
-        st.subheader("🔮 Magic Setup Progress")
-        
-        # Cancel button
+    # Simple form - no complex session state
+    with st.form("magic_setup_form"):
         col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            proxy_string = st.text_input(
+                "🌐 Proxy String",
+                placeholder="socks5://user:pass@1.2.3.4:1337  or  host:port:user:pass",
+                help="Supports multiple formats: protocol://user:pass@host:port or host:port:user:pass"
+            )
+        
         with col2:
-            if st.button("❌ Cancel"):
-                st.session_state.magic_task_id = None
-                st.session_state.magic_complete = False
-                st.rerun()
+            name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
         
-        # Get current status
-        task_status = api_get(f"/tasks/{task_id}")
+        # Submit button inside form - guaranteed to work
+        submitted = st.form_submit_button("🚀 Launch Magic Setup", type="primary", use_container_width=True)
         
-        if task_status:
-            progress = task_status.get("progress", 0)
-            current_step = task_status.get("current_step", "Working...")
-            status = task_status.get("status", "running")
-            
-            # Progress bar
-            st.progress(progress / 100)
-            st.markdown(f"**Status:** {status.upper()} | **Step:** {current_step}")
-            
-            # Show completed steps
-            steps = task_status.get("steps_completed", [])
-            if steps:
-                for s in steps[-5:]:
-                    st.write(f"✅ {s['step']}")
-            
-            if status == "complete":
-                st.session_state.magic_complete = True
-                st.balloons()
-                
-                result = task_status.get("result", {})
-                st.success(f"""
-                🎉 **Account Created Successfully!**
-                - Account ID: `{result.get('account_id')}`
-                - Phone ID: `{result.get('phone_id')}`
-                """)
-                
-                if result.get("credentials"):
-                    creds = result["credentials"]
-                    st.info(f"""
-                    **Credentials (saved to vault)**
-                    - Username: `{creds.get('username')}`
-                    - Email: `{creds.get('email')}`
-                    - Password: `{creds.get('password')}`
-                    """)
-                
-                if st.button("🔄 Start Another"):
-                    st.session_state.magic_task_id = None
-                    st.session_state.magic_complete = False
-                    st.rerun()
-            
-            elif status == "failed":
-                st.session_state.magic_complete = True
-                st.error(f"❌ **Setup Failed:** {task_status.get('error', 'Unknown error')}")
-                
-                if st.button("🔄 Try Again"):
-                    st.session_state.magic_task_id = None
-                    st.session_state.magic_complete = False
-                    st.rerun()
-            
-            else:
-                # Still running - use st.empty with auto-refresh meta tag
-                st.info("⏳ Task is running... This page will auto-refresh.")
-                import time
-                time.sleep(3)
-                st.rerun()
-    
-    else:
-        # Only show launch button when no task is running
-        if st.button("🚀 Launch Magic Setup", type="primary", use_container_width=True):
+        if submitted:
             if not proxy_string:
-                st.warning("Please enter a proxy string")
+                st.warning("⚠️ Please enter a proxy string")
             else:
+                st.info("🔄 Starting Magic Setup... (this may take 2-5 minutes)")
+                
                 # Start async task
                 result = api_post("/accounts/full-setup-async", {
                     "proxy_string": proxy_string,
@@ -382,12 +306,54 @@ elif page == "✨ Magic Setup":
                 })
                 
                 if result and result.get("task_id"):
-                    st.session_state.magic_task_id = result["task_id"]
-                    st.session_state.magic_complete = False
-                    st.success(f"✅ Task started! ID: {result['task_id']}")
-                    st.rerun()
+                    task_id = result["task_id"]
+                    st.success(f"✅ Task started! ID: `{task_id}`")
+                    st.markdown(f"👉 **[Check progress in Logs tab](#)** or wait here...")
+                    
+                    # Poll for completion
+                    import time
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    for i in range(120):  # Max 10 minutes (120 * 5 seconds)
+                        time.sleep(5)
+                        task_status = api_get(f"/tasks/{task_id}")
+                        
+                        if task_status:
+                            progress = task_status.get("progress", 0)
+                            current_step = task_status.get("current_step", "Working...")
+                            status = task_status.get("status", "running")
+                            
+                            progress_bar.progress(progress / 100)
+                            status_text.markdown(f"**{status.upper()}**: {current_step}")
+                            
+                            if status == "complete":
+                                st.balloons()
+                                res = task_status.get("result", {})
+                                st.success(f"""
+                                🎉 **Account Created!**
+                                - Account ID: `{res.get('account_id')}`
+                                - Phone ID: `{res.get('phone_id')}`
+                                """)
+                                if res.get("credentials"):
+                                    creds = res["credentials"]
+                                    st.info(f"""
+                                    **Credentials**: `{creds.get('username')}` / `{creds.get('email')}` / `{creds.get('password')}`
+                                    """)
+                                break
+                            
+                            elif status == "failed":
+                                st.error(f"❌ Failed: {task_status.get('error')}")
+                                break
+                        else:
+                            status_text.warning("Waiting for task status...")
+                    else:
+                        st.warning("⏰ Task taking too long. Check Logs tab for status.")
+                
                 elif result:
-                    st.error(f"Error: {result}")
+                    st.error(f"Error starting task: {result}")
+                else:
+                    st.error("Failed to connect to API")
     
     st.markdown("---")
     st.caption("💡 Tip: Use static residential proxies for best results. Each proxy should be unique.")
