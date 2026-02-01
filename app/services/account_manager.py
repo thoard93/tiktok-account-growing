@@ -449,19 +449,39 @@ class AccountManager:
             if not response.success:
                 raise Exception(f"Failed to create phone: {response.message}")
             
-            phone_id = response.data.get("phoneId") or response.data.get("id")
+            # Debug: Log the response to understand structure
+            logger.info(f"Phone creation response data: {response.data}")
+            
+            # Extract phone ID from response - handle different response formats
+            phone_id = None
+            if isinstance(response.data, dict):
+                phone_id = response.data.get("phoneId") or response.data.get("id")
+                # Check if it's in a nested list (batch create returns list)
+                if not phone_id and "data" in response.data:
+                    data_list = response.data.get("data", [])
+                    if data_list and isinstance(data_list, list):
+                        phone_id = data_list[0].get("phoneId") or data_list[0].get("id")
+            elif isinstance(response.data, list) and response.data:
+                phone_id = response.data[0].get("phoneId") or response.data[0].get("id")
+            
+            if not phone_id:
+                raise Exception(f"Could not extract phone ID from response: {response.data}")
+            
+            logger.info(f"Extracted phone_id: {phone_id}")
             result["phone_id"] = phone_id
             update_status("Phone created", "complete")
             
             # Step 3: Start the phone
             update_status("Starting cloud phone")
             start_response = self.geelark.start_phones([phone_id])
+            logger.info(f"Start phone response: success={start_response.success}, message={start_response.message}")
             if not start_response.success:
                 raise Exception(f"Failed to start phone: {start_response.message}")
             
             # Wait for phone to boot
             time.sleep(15)
             update_status("Phone started", "complete")
+
             
             # Step 4: Install TikTok
             update_status("Installing TikTok")
