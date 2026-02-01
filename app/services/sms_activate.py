@@ -44,7 +44,8 @@ class SMSClient:
     """
     
     # HeroSMS API (same format as SMS-Activate)
-    BASE_URL = "https://api.herosms.com/stubs/handler_api.php"
+    # Domain is hero-sms.com (with hyphen)
+    BASE_URL = "https://api.hero-sms.com/stubs/handler_api.php"
     
     # Service codes for popular platforms
     SERVICES = {
