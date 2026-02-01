@@ -1,0 +1,341 @@
+"""
+Scheduler Service
+=================
+Background scheduler for automated warmup and posting tasks.
+"""
+
+import time
+from datetime import datetime, timedelta
+from typing import Optional, List
+from loguru import logger
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from sqlalchemy.orm import Session
+
+from app.database import SessionLocal
+from app.models.account import Account, AccountStatus
+from app.services.warmup_service import WarmupService
+from app.services.posting_service import PostingService
+from app.services.geelark_client import GeeLarkClient
+from app.config import get_settings
+
+
+class AutomationScheduler:
+    """
+    Background scheduler for running automated tasks.
+    
+    Handles:
+    - Daily warmup sessions for accounts in warmup phase
+    - Automatic video posting for active accounts  
+    - Task status monitoring
+    - Cleanup of completed tasks
+    """
+    
+    def __init__(self, geelark_client: GeeLarkClient):
+        """Initialize scheduler with GeeLark client."""
+        self.settings = get_settings()
+        self.geelark = geelark_client
+        self.scheduler = BackgroundScheduler()
+        self._running = False
+        
+        logger.info("AutomationScheduler initialized")
+    
+    def _get_db_session(self) -> Session:
+        """Get a new database session."""
+        return SessionLocal()
+    
+    # ===========================
+    # Warmup Jobs
+    # ===========================
+    
+    def run_daily_warmup(self):
+        """
+        Run warmup for all accounts in warming_up status.
+        Called once per day by scheduler.
+        """
+        logger.info("Starting daily warmup job...")
+        
+        db = self._get_db_session()
+        try:
+            warmup_service = WarmupService(db, self.geelark)
+            results = warmup_service.run_batch_warmup()
+            
+            logger.info(
+                f"Daily warmup complete: {results['success']} success, "
+                f"{results['failed']} failed, {results['completed']} completed warmup"
+            )
+            
+        except Exception as e:
+            logger.error(f"Daily warmup job failed: {e}")
+        finally:
+            db.close()
+    
+    def check_warmup_progress(self):
+        """
+        Check warmup progress and advance accounts to next day.
+        Called periodically to monitor warmup completion.
+        """
+        logger.debug("Checking warmup progress...")
+        
+        db = self._get_db_session()
+        try:
+            # Get accounts that ran warmup today
+            today = datetime.utcnow().date()
+            yesterday = today - timedelta(days=1)
+            
+            warming_accounts = db.query(Account).filter(
+                Account.status == AccountStatus.WARMING_UP,
+                Account.warmup_complete == False
+            ).all()
+            
+            for account in warming_accounts:
+                # Check if last activity was today
+                if account.last_activity and account.last_activity.date() == today:
+                    # Already ran warmup today, check if can advance
+                    pass
+                elif account.last_activity and account.last_activity.date() < yesterday:
+                    # Missed a day - may need reset or notification
+                    logger.warning(
+                        f"Account {account.id} missed warmup day "
+                        f"(last: {account.last_activity})"
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Warmup progress check failed: {e}")
+        finally:
+            db.close()
+    
+    # ===========================
+    # Posting Jobs
+    # ===========================
+    
+    def run_auto_posting(self):
+        """
+        Auto-post videos to active accounts.
+        Called by scheduler based on posting schedule.
+        """
+        logger.info("Starting auto-posting job...")
+        
+        db = self._get_db_session()
+        try:
+            posting_service = PostingService(db, self.geelark)
+            results = posting_service.auto_assign_and_post(
+                videos_per_account=1
+            )
+            
+            logger.info(
+                f"Auto-posting complete: {results['videos_posted']} videos "
+                f"posted to {results['accounts_used']} accounts"
+            )
+            
+        except Exception as e:
+            logger.error(f"Auto-posting job failed: {e}")
+        finally:
+            db.close()
+    
+    # ===========================
+    # Task Monitoring Jobs
+    # ===========================
+    
+    def check_pending_tasks(self):
+        """
+        Check status of pending GeeLark tasks and update activity logs.
+        """
+        logger.debug("Checking pending tasks...")
+        
+        db = self._get_db_session()
+        try:
+            from app.models.account import ActivityLog
+            
+            # Get recent pending tasks (last 24 hours)
+            cutoff = datetime.utcnow() - timedelta(hours=24)
+            
+            pending_logs = db.query(ActivityLog).filter(
+                ActivityLog.geelark_task_id.isnot(None),
+                ActivityLog.success == True,  # Initial success (task created)
+                ActivityLog.created_at >= cutoff
+            ).limit(50).all()
+            
+            if not pending_logs:
+                return
+            
+            # Query task status
+            task_ids = [log.geelark_task_id for log in pending_logs if log.geelark_task_id]
+            if not task_ids:
+                return
+            
+            response = self.geelark.query_tasks(task_ids)
+            
+            if response.success and response.data:
+                items = response.data.get("items", [])
+                task_map = {t["id"]: t for t in items}
+                
+                for log in pending_logs:
+                    if log.geelark_task_id in task_map:
+                        task = task_map[log.geelark_task_id]
+                        status = task.get("status")
+                        
+                        # Update if failed
+                        if status == 4:  # Failed
+                            log.success = False
+                            log.error_message = task.get("failDesc", "Task failed")
+                            
+                            # Update account if it was a critical action
+                            if log.action_type in ["warmup_session", "video_posted"]:
+                                account = db.query(Account).filter(
+                                    Account.id == log.account_id
+                                ).first()
+                                if account and "blocked" in log.error_message.lower():
+                                    account.status = AccountStatus.BANNED
+                
+                db.commit()
+                
+        except Exception as e:
+            logger.error(f"Task monitoring failed: {e}")
+        finally:
+            db.close()
+    
+    def retry_failed_tasks(self):
+        """
+        Automatically retry tasks that failed due to transient errors.
+        """
+        logger.debug("Checking for tasks to retry...")
+        
+        db = self._get_db_session()
+        try:
+            from app.models.account import ActivityLog
+            
+            # Get recent failed tasks (last 6 hours)
+            cutoff = datetime.utcnow() - timedelta(hours=6)
+            
+            failed_logs = db.query(ActivityLog).filter(
+                ActivityLog.geelark_task_id.isnot(None),
+                ActivityLog.success == False,
+                ActivityLog.created_at >= cutoff
+            ).limit(20).all()
+            
+            # Retryable error patterns (transient issues)
+            retryable_patterns = [
+                "network", "timeout", "loading", "connection",
+                "20100", "20108", "20124", "20133"
+            ]
+            
+            tasks_to_retry = []
+            for log in failed_logs:
+                error = (log.error_message or "").lower()
+                if any(p in error for p in retryable_patterns):
+                    tasks_to_retry.append(log.geelark_task_id)
+            
+            if tasks_to_retry:
+                response = self.geelark._make_request(
+                    "/task/restart",
+                    {"ids": tasks_to_retry}
+                )
+                
+                if response.success:
+                    logger.info(f"Retried {len(tasks_to_retry)} failed tasks")
+                    
+        except Exception as e:
+            logger.error(f"Task retry failed: {e}")
+        finally:
+            db.close()
+    
+    # ===========================
+    # Scheduler Control
+    # ===========================
+    
+    def start(self):
+        """Start the scheduler with configured jobs."""
+        if self._running:
+            logger.warning("Scheduler already running")
+            return
+        
+        # Daily warmup - runs at configured time each day
+        self.scheduler.add_job(
+            self.run_daily_warmup,
+            CronTrigger(hour=10, minute=0),  # 10 AM UTC
+            id="daily_warmup",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Auto-posting - runs multiple times per day for active accounts
+        self.scheduler.add_job(
+            self.run_auto_posting,
+            CronTrigger(hour="9,14,19"),  # 9 AM, 2 PM, 7 PM UTC
+            id="auto_posting",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Task monitoring - runs every 5 minutes
+        self.scheduler.add_job(
+            self.check_pending_tasks,
+            IntervalTrigger(minutes=5),
+            id="task_monitor",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Task retry - runs every 30 minutes
+        self.scheduler.add_job(
+            self.retry_failed_tasks,
+            IntervalTrigger(minutes=30),
+            id="task_retry",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Warmup progress check - runs every hour
+        self.scheduler.add_job(
+            self.check_warmup_progress,
+            IntervalTrigger(hours=1),
+            id="warmup_progress",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        self.scheduler.start()
+        self._running = True
+        logger.info("AutomationScheduler started")
+    
+    def stop(self):
+        """Stop the scheduler."""
+        if not self._running:
+            return
+        
+        self.scheduler.shutdown(wait=True)
+        self._running = False
+        logger.info("AutomationScheduler stopped")
+    
+    def get_jobs(self) -> List[dict]:
+        """Get list of scheduled jobs."""
+        return [
+            {
+                "id": job.id,
+                "next_run": str(job.next_run_time),
+                "trigger": str(job.trigger)
+            }
+            for job in self.scheduler.get_jobs()
+        ]
+    
+    def run_job_now(self, job_id: str) -> bool:
+        """Manually trigger a job to run immediately."""
+        job = self.scheduler.get_job(job_id)
+        if job:
+            job.modify(next_run_time=datetime.utcnow())
+            return True
+        return False
+
+
+# Singleton instance
+_scheduler_instance: Optional[AutomationScheduler] = None
+
+
+def get_scheduler(geelark_client: GeeLarkClient) -> AutomationScheduler:
+    """Get or create scheduler singleton."""
+    global _scheduler_instance
+    if _scheduler_instance is None:
+        _scheduler_instance = AutomationScheduler(geelark_client)
+    return _scheduler_instance

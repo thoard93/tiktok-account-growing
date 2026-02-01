@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: tiktok-automation-api
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: GEELARK_AUTH_METHOD
+        value: TOKEN
+      - key: GEELARK_APP_TOKEN
+        sync: false
+      - key: GEELARK_API_BASE_URL
+        value: https://openapi.geelark.com/open/v1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tiktok-db
+          property: connectionString
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DEBUG
+        value: "false"
+      - key: WARMUP_DAYS
+        value: "5"
+      - key: VIDEO_STORAGE_PATH
+        value: ./data/videos
+
+databases:
+  - name: tiktok-db
+    plan: free
+    databaseName: tiktok_automation
