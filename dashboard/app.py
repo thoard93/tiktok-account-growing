@@ -326,11 +326,17 @@ elif page == "✨ Magic Setup":
                         task_status = api_get(f"/tasks/{task_id}")
                         
                         if task_status:
-                            progress = int(task_status.get("progress", 0) or 0)
+                            # Robust progress parsing - handle various formats
+                            progress_val = task_status.get("progress", 0)
+                            try:
+                                progress = int(progress_val) if progress_val is not None else 0
+                            except (ValueError, TypeError):
+                                progress = 0  # Default if not a valid number
+                            
                             current_step = task_status.get("current_step", "Working...")
                             status = task_status.get("status", "running")
                             
-                            progress_bar.progress(progress / 100)
+                            progress_bar.progress(max(0, min(progress, 100)) / 100)
                             status_text.markdown(f"**{status.upper()}**: {current_step}")
                             
                             if status == "complete":
