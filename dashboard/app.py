@@ -168,17 +168,23 @@ def api_post(endpoint: str, data: dict = None):
 
 def api_post_long(endpoint: str, data: dict = None):
     """Make POST request with extended timeout for long-running operations like Magic Setup."""
+    full_url = f"{API_BASE_URL}{endpoint}"
     try:
         # 5-minute timeout for operations like phone creation + TikTok install + account creation
-        response = requests.post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=300)
+        st.write(f"🔗 Calling: `{full_url}`")  # Debug output
+        response = requests.post(full_url, json=data or {}, timeout=300)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.Timeout:
         st.error("⏳ Operation is taking longer than expected. Check the 📊 Logs page for progress.")
         return None
-    except Exception as e:
-        st.error(f"API Error: {e}")
+    except requests.exceptions.ConnectionError as e:
+        st.error(f"🔌 Connection Error to {full_url}: {e}")
         return None
+    except Exception as e:
+        st.error(f"API Error calling {full_url}: {type(e).__name__}: {e}")
+        return None
+
 
 
 # ===========================
