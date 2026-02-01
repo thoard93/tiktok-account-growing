@@ -272,6 +272,12 @@ elif page == "✨ Magic Setup":
     st.markdown("---")
     
     # Input form
+    # Initialize session state for task tracking (at top of page)
+    if "magic_task_id" not in st.session_state:
+        st.session_state.magic_task_id = None
+    if "magic_complete" not in st.session_state:
+        st.session_state.magic_complete = False
+    
     col1, col2 = st.columns([3, 1])
     
     with col1:
@@ -284,42 +290,20 @@ elif page == "✨ Magic Setup":
     with col2:
         name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
     
-    # Initialize session state for task tracking
-    if "magic_task_id" not in st.session_state:
-        st.session_state.magic_task_id = None
-    if "magic_complete" not in st.session_state:
-        st.session_state.magic_complete = False
-    
-    # Launch button
-    if st.button("🚀 Launch Magic Setup", type="primary", use_container_width=True):
-        if not proxy_string:
-            st.warning("Please enter a proxy string")
-        else:
-            # Start async task
-            result = api_post("/accounts/full-setup-async", {
-                "proxy_string": proxy_string,
-                "name_prefix": name_prefix or "",
-                "max_retries": 5
-            })
-            
-            if result and result.get("task_id"):
-                st.session_state.magic_task_id = result["task_id"]
-                st.session_state.magic_complete = False
-                st.rerun()
-    
-    # Show progress if task is running
+    # Show progress if task is running (BEFORE the button to prevent blocking)
     if st.session_state.magic_task_id and not st.session_state.magic_complete:
         task_id = st.session_state.magic_task_id
-        
-        # Poll for status
-        import time
         
         st.markdown("---")
         st.subheader("🔮 Magic Setup Progress")
         
-        status_container = st.empty()
-        progress_bar = st.progress(0)
-        steps_container = st.empty()
+        # Cancel button
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("❌ Cancel"):
+                st.session_state.magic_task_id = None
+                st.session_state.magic_complete = False
+                st.rerun()
         
         # Get current status
         task_status = api_get(f"/tasks/{task_id}")
@@ -329,15 +313,15 @@ elif page == "✨ Magic Setup":
             current_step = task_status.get("current_step", "Working...")
             status = task_status.get("status", "running")
             
-            # Update UI
-            progress_bar.progress(progress)
-            status_container.markdown(f"**Status:** {status.upper()} | **Current:** {current_step}")
+            # Progress bar
+            st.progress(progress / 100)
+            st.markdown(f"**Status:** {status.upper()} | **Step:** {current_step}")
             
             # Show completed steps
             steps = task_status.get("steps_completed", [])
             if steps:
-                step_text = "\n".join([f"✅ {s['step']}" for s in steps[-5:]])  # Last 5 steps
-                steps_container.markdown(step_text)
+                for s in steps[-5:]:
+                    st.write(f"✅ {s['step']}")
             
             if status == "complete":
                 st.session_state.magic_complete = True
@@ -359,7 +343,6 @@ elif page == "✨ Magic Setup":
                     - Password: `{creds.get('password')}`
                     """)
                 
-                # Reset button
                 if st.button("🔄 Start Another"):
                     st.session_state.magic_task_id = None
                     st.session_state.magic_complete = False
@@ -375,9 +358,32 @@ elif page == "✨ Magic Setup":
                     st.rerun()
             
             else:
-                # Still running - auto-refresh in 3 seconds
+                # Still running - use st.empty with auto-refresh meta tag
+                st.info("⏳ Task is running... This page will auto-refresh.")
+                import time
                 time.sleep(3)
                 st.rerun()
+    
+    else:
+        # Only show launch button when no task is running
+        if st.button("🚀 Launch Magic Setup", type="primary", use_container_width=True):
+            if not proxy_string:
+                st.warning("Please enter a proxy string")
+            else:
+                # Start async task
+                result = api_post("/accounts/full-setup-async", {
+                    "proxy_string": proxy_string,
+                    "name_prefix": name_prefix or "",
+                    "max_retries": 5
+                })
+                
+                if result and result.get("task_id"):
+                    st.session_state.magic_task_id = result["task_id"]
+                    st.session_state.magic_complete = False
+                    st.success(f"✅ Task started! ID: {result['task_id']}")
+                    st.rerun()
+                elif result:
+                    st.error(f"Error: {result}")
     
     st.markdown("---")
     st.caption("💡 Tip: Use static residential proxies for best results. Each proxy should be unique.")
