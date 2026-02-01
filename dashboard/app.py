@@ -298,8 +298,8 @@ elif page == "✨ Magic Setup":
             else:
                 st.info("🔄 Starting Magic Setup... (this may take 2-5 minutes)")
                 
-                # Start async task
-                result = api_post("/accounts/full-setup-async", {
+                # Start async task - use long timeout for cold starts
+                result = api_post_long("/accounts/full-setup-async", {
                     "proxy_string": proxy_string,
                     "name_prefix": name_prefix or "",
                     "max_retries": 5
