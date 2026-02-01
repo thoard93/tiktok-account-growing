@@ -195,7 +195,7 @@ page = st.sidebar.radio(
 
 # Version footer - update on each deploy
 st.sidebar.markdown("---")
-st.sidebar.caption("v0.3.0 - Form-based Magic Setup")
+st.sidebar.caption(f"v0.4.2 | API: {API_BASE_URL[:40]}...")
 
 
 # ===========================
