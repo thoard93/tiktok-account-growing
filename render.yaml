@@ -1,14 +1,14 @@
 services:
   - type: web
     name: tiktok-automation-api
-    runtime: python
-    python:
-      version: "3.11.0"
+    env: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
       - key: GEELARK_AUTH_METHOD
         value: TOKEN
       - key: GEELARK_APP_TOKEN
