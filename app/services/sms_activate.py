@@ -43,9 +43,9 @@ class SMSClient:
         client.complete_activation(number.activation_id)
     """
     
-    # HeroSMS API (same format as SMS-Activate)
-    # Domain is hero-sms.com (with hyphen)
-    BASE_URL = "https://api.hero-sms.com/stubs/handler_api.php"
+    # HeroSMS API - using main domain (api subdomain doesn't exist)
+    # Fallback order: hero-sms.com, then get-sms.com (compatible API)
+    BASE_URL = "https://hero-sms.com/stubs/handler_api.php"
     
     # Service codes for popular platforms
     SERVICES = {
