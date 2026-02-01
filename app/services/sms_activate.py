@@ -296,14 +296,173 @@ class SMSClient:
         return self.set_status(activation_id, self.STATUS_CODES["request_another"])
 
 
+class SMSPoolClient:
+    """
+    SMSPool.net client - better TikTok availability than most providers.
+    
+    API Docs: https://www.smspool.net/article/how-to-use-the-smspool-api
+    """
+    
+    BASE_URL = "https://api.smspool.net"
+    
+    # Country names for SMSPool (uses country names, not codes)
+    COUNTRIES = {
+        "usa": "US",
+        "uk": "GB",
+        "canada": "CA",
+        "russia": "RU",
+        "indonesia": "ID",
+        "philippines": "PH",
+        "india": "IN",
+    }
+    
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key or os.getenv("SMSPOOL_API_KEY")
+        if not self.api_key:
+            logger.warning("SMSPool API key not configured")
+    
+    def _make_request(self, endpoint: str, data: Dict[str, Any]) -> Dict:
+        """Make POST request to SMSPool API."""
+        data["key"] = self.api_key
+        
+        try:
+            response = requests.post(f"{self.BASE_URL}/{endpoint}", data=data, timeout=30)
+            response.raise_for_status()
+            logger.debug(f"SMSPool response: {response.text}")
+            return response.json()
+        except requests.RequestException as e:
+            logger.error(f"SMSPool API error: {e}")
+            raise
+    
+    def get_balance(self) -> float:
+        """Get current account balance."""
+        try:
+            result = self._make_request("request/balance", {})
+            balance = float(result.get("balance", 0))
+            logger.info(f"SMSPool balance: ${balance:.2f}")
+            return balance
+        except Exception as e:
+            logger.error(f"Failed to get SMSPool balance: {e}")
+            return 0.0
+    
+    def get_number(self, service: str = "tiktok", country: str = "usa") -> Optional[SMSNumber]:
+        """Request a virtual phone number."""
+        country_code = self.COUNTRIES.get(country.lower(), "US")
+        
+        try:
+            result = self._make_request("purchase/sms", {
+                "service": "395",  # TikTok service ID
+                "country": country_code,
+            })
+            
+            if result.get("success") == 1:
+                phone = result.get("phonenumber", "")
+                order_id = str(result.get("order_id", ""))
+                
+                if not phone.startswith("+"):
+                    phone = f"+{phone}"
+                
+                logger.info(f"SMSPool got number: {phone} (Order: {order_id})")
+                
+                return SMSNumber(
+                    activation_id=order_id,
+                    phone_number=phone,
+                    country=country,
+                    service=service,
+                    provider="smspool",
+                    status="waiting"
+                )
+            else:
+                error = result.get("message", "Unknown error")
+                logger.error(f"SMSPool get_number failed: {error}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"SMSPool get_number error: {e}")
+            return None
+    
+    def get_status(self, activation_id: str) -> Tuple[str, Optional[str]]:
+        """Check SMS status."""
+        try:
+            result = self._make_request("sms/check", {"orderid": activation_id})
+            
+            status = result.get("status")
+            if status == 3:  # SMS received
+                code = result.get("sms", "")
+                # Extract code from SMS text (usually 6 digits)
+                import re
+                code_match = re.search(r'\d{4,6}', str(code))
+                if code_match:
+                    code = code_match.group()
+                logger.info(f"SMSPool code received: {code}")
+                return ("received", code)
+            elif status == 1:  # Pending
+                return ("waiting", None)
+            elif status == 4:  # Expired/Cancelled
+                return ("cancelled", None)
+            else:
+                return ("waiting", None)
+                
+        except Exception as e:
+            logger.error(f"SMSPool get_status error: {e}")
+            return ("unknown", None)
+    
+    def wait_for_code(self, activation_id: str, timeout: int = 120, poll_interval: int = 5) -> Optional[str]:
+        """Wait for SMS code with polling."""
+        logger.info(f"SMSPool waiting for code (timeout: {timeout}s)...")
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            status, code = self.get_status(activation_id)
+            
+            if status == "received" and code:
+                return code
+            elif status == "cancelled":
+                return None
+            
+            time.sleep(poll_interval)
+        
+        logger.warning(f"SMSPool timeout after {timeout}s")
+        return None
+    
+    def cancel_activation(self, activation_id: str) -> bool:
+        """Cancel an order."""
+        try:
+            result = self._make_request("sms/cancel", {"orderid": activation_id})
+            return result.get("success") == 1
+        except:
+            return False
+    
+    def complete_activation(self, activation_id: str) -> bool:
+        """Mark activation complete (no explicit API call needed for SMSPool)."""
+        return True
+
+
 # Alias for backward compatibility
 SMSActivateClient = SMSClient
 
 
 def get_sms_client() -> Optional[SMSClient]:
-    """Get configured SMS client, or None if not configured."""
+    """Get configured SMS client (HeroSMS primary)."""
     api_key = os.getenv("HEROSMS_API_KEY")
     if not api_key:
         logger.warning("HEROSMS_API_KEY not set - SMS verification disabled")
         return None
     return SMSClient(api_key=api_key)
+
+
+def get_smspool_client() -> Optional[SMSPoolClient]:
+    """Get configured SMSPool client (backup provider)."""
+    api_key = os.getenv("SMSPOOL_API_KEY")
+    if not api_key:
+        logger.debug("SMSPOOL_API_KEY not set - backup SMS provider not available")
+        return None
+    return SMSPoolClient(api_key=api_key)
+
+
+def get_any_sms_client():
+    """Get any available SMS client (tries HeroSMS first, then SMSPool)."""
+    client = get_sms_client()
+    if client:
+        return client
+    return get_smspool_client()
