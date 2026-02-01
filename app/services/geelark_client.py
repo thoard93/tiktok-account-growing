@@ -840,18 +840,45 @@ class GeeLarkClient:
         """
         Helper to install TikTok on a phone.
         First searches for TikTok in app shop, then installs latest version.
+        Specifically selects the main TikTok app, not TikTok Studio/Lite.
         """
+        from loguru import logger
+        
         # Search for TikTok
-        search_result = self.search_app_shop(keyword="tiktok", page_size=10)
+        search_result = self.search_app_shop(keyword="tiktok", page_size=20)
         if not search_result.success:
             return search_result
         
         items = search_result.data.get("items", [])
+        logger.info(f"TikTok app search results: {[app.get('appName') for app in items]}")
+        
         tiktok_app = None
+        
+        # Priority 1: Look for exact "TikTok" or package name
         for app in items:
-            if "tiktok" in app.get("appName", "").lower():
+            app_name = app.get("appName", "").strip()
+            package_name = app.get("packageName", "")
+            
+            # The main TikTok app package is com.zhiliaoapp.musically or com.ss.android.ugc.trill
+            if package_name in ["com.zhiliaoapp.musically", "com.ss.android.ugc.trill"]:
                 tiktok_app = app
+                logger.info(f"Found TikTok by package: {app_name} ({package_name})")
                 break
+            
+            # Or exact name match (just "TikTok", not "TikTok Studio", "TikTok Lite", etc.)
+            if app_name.lower() == "tiktok":
+                tiktok_app = app
+                logger.info(f"Found TikTok by exact name: {app_name}")
+                break
+        
+        # Priority 2: Look for TikTok but NOT Studio/Lite
+        if not tiktok_app:
+            for app in items:
+                app_name = app.get("appName", "").lower()
+                if "tiktok" in app_name and "studio" not in app_name and "lite" not in app_name:
+                    tiktok_app = app
+                    logger.info(f"Found TikTok (excluding Studio/Lite): {app.get('appName')}")
+                    break
         
         if not tiktok_app:
             return GeeLarkResponse(
@@ -867,8 +894,10 @@ class GeeLarkClient:
                 data=None, trace_id=""
             )
         
+        logger.info(f"Installing TikTok: {tiktok_app.get('appName')}, version ID: {versions[0].get('id')}")
         latest_version_id = versions[0].get("id")
         return self.install_app(phone_id, latest_version_id)
+
     
     # ===========================
     # Task Management Methods
