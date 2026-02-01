@@ -132,6 +132,17 @@ class WarmupService:
                 **config
             })
             
+            # ===== AUTO-SHUTDOWN TO SAVE MINUTES =====
+            # Stop the phone after warmup to avoid burning subscription time
+            logger.info(f"Stopping phone {account.geelark_profile_id} after warmup to save minutes")
+            self.geelark.stop_phones([account.geelark_profile_id])
+            
+            self._log_activity(account_id, "phone_stopped_after_warmup", {
+                "day": account.warmup_day,
+                "reason": "save_subscription_minutes"
+            })
+            # ==========================================
+            
             return True
         else:
             self._log_activity(
