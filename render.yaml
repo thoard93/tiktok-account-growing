@@ -1,4 +1,5 @@
 services:
+  # FastAPI Backend
   - type: web
     name: tiktok-automation-api
     env: python
@@ -27,6 +28,19 @@ services:
         value: "5"
       - key: VIDEO_STORAGE_PATH
         value: ./data/videos
+
+  # Streamlit Dashboard
+  - type: web
+    name: tiktok-dashboard
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt streamlit pandas
+    startCommand: streamlit run dashboard/app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: API_BASE_URL
+        value: https://tiktok-automation-api.onrender.com/api
 
 databases:
   - name: tiktok-db
