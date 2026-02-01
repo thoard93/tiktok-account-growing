@@ -588,18 +588,32 @@ class AccountManager:
             host = port = username = password = None
             
             if "://" in proxy_string:
-                # URL format
+                # URL format - check for different sub-formats
                 parts = proxy_string.split("://")
                 protocol = parts[0].upper()
                 rest = parts[1]
                 
                 if "@" in rest:
+                    # Standard URL format: user:pass@host:port
                     auth, host_port = rest.rsplit("@", 1)
                     if ":" in auth:
                         username, password = auth.split(":", 1)
                     host, port = host_port.rsplit(":", 1)
                 else:
-                    host, port = rest.rsplit(":", 1)
+                    # Could be either host:port or host:port:user:pass
+                    colon_parts = rest.split(":")
+                    if len(colon_parts) >= 4:
+                        # Format: protocol://host:port:user:pass
+                        host = colon_parts[0]
+                        port = colon_parts[1]
+                        username = colon_parts[2]
+                        password = ":".join(colon_parts[3:])  # In case password has colons
+                    elif len(colon_parts) >= 2:
+                        # Format: protocol://host:port
+                        host, port = colon_parts[0], colon_parts[1]
+                    else:
+                        return None
+
             else:
                 # Colon-separated format
                 parts = proxy_string.split(":")
