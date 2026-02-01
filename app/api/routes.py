@@ -373,9 +373,7 @@ async def full_automation_setup(
 @router.post("/accounts/full-setup-async", tags=["Accounts"])
 async def full_automation_setup_async(
     data: FullSetupRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    background_tasks: BackgroundTasks
 ):
     """
     🚀 ASYNC Zero-touch automation - Returns immediately with task_id.
@@ -389,25 +387,24 @@ async def full_automation_setup_async(
     4. Store credentials securely
     5. Start the warmup process
     """
-    from app.services.task_tracker import create_task, update_task, TaskStatus
+    from app.services.task_tracker import create_task
     
-    # Create task immediately
+    # Create task immediately - this is synchronous and fast
     task_id = create_task("magic_setup", {
         "proxy_string": data.proxy_string[:50] + "..." if len(data.proxy_string) > 50 else data.proxy_string,
         "name_prefix": data.name_prefix
     })
     
-    # Run in background
+    # Run in background - don't pass db/geelark, create fresh inside
     background_tasks.add_task(
         run_magic_setup_background,
         task_id=task_id,
         proxy_string=data.proxy_string,
         name_prefix=data.name_prefix,
-        max_retries=data.max_retries,
-        db=db,
-        geelark=geelark
+        max_retries=data.max_retries
     )
     
+    # Return immediately with task_id
     return {
         "task_id": task_id,
         "status": "started",
@@ -419,13 +416,20 @@ def run_magic_setup_background(
     task_id: str,
     proxy_string: str,
     name_prefix: str,
-    max_retries: int,
-    db: Session,
-    geelark: GeeLarkClient
+    max_retries: int
 ):
-    """Background worker for Magic Setup."""
+    """Background worker for Magic Setup - creates its own session/client."""
     from app.services.task_tracker import update_task, TaskStatus
     from app.services.account_manager import AccountManager
+    from app.database import SessionLocal
+    import os
+    
+    # Create fresh database session and GeeLark client for this background task
+    db = SessionLocal()
+    geelark = GeeLarkClient(
+        app_id=os.getenv("GEELARK_APP_ID", ""),
+        app_key=os.getenv("GEELARK_APP_KEY", "")
+    )
     
     try:
         update_task(task_id, status=TaskStatus.RUNNING, progress=5, current_step="Initializing...")
@@ -468,6 +472,10 @@ def run_magic_setup_background(
             error=str(e),
             current_step="Error occurred"
         )
+    
+    finally:
+        # Always close the session
+        db.close()
 
 
 @router.get("/tasks/{task_id}", tags=["Tasks"])
