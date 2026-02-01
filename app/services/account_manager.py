@@ -480,8 +480,36 @@ class AccountManager:
             if not start_response.success:
                 raise Exception(f"Failed to start phone: {start_response.message}")
             
-            # Wait for phone to boot
-            time.sleep(15)
+            # Poll for phone to actually be running (status 0 = Started)
+            # Phone boot can take 60-120 seconds
+            max_wait = 120  # 2 minutes max
+            poll_interval = 10  # Check every 10 seconds
+            waited = 0
+            phone_ready = False
+            
+            while waited < max_wait:
+                time.sleep(poll_interval)
+                waited += poll_interval
+                update_status(f"Waiting for phone to boot ({waited}s)")
+                
+                status_response = self.geelark.get_phone_status([phone_id])
+                if status_response.success and status_response.data:
+                    # Response format: {'data': [{'id': '...', 'openStatus': 0}]}
+                    phone_data = status_response.data
+                    if isinstance(phone_data, dict) and 'data' in phone_data:
+                        phone_list = phone_data.get('data', [])
+                        if phone_list and len(phone_list) > 0:
+                            status = phone_list[0].get('openStatus')
+                            logger.info(f"Phone status check: openStatus={status}")
+                            if status == 0:  # 0 = Started
+                                phone_ready = True
+                                break
+                            elif status == 3:  # Expired
+                                raise Exception("Phone expired during boot")
+            
+            if not phone_ready:
+                raise Exception(f"Phone did not start within {max_wait} seconds")
+            
             update_status("Phone started", "complete")
 
             
