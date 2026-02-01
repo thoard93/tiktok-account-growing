@@ -20,18 +20,58 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS - Premium Dark Mode
 st.markdown("""
 <style>
-    .stMetric {
-        background-color: #1e1e1e;
-        padding: 15px;
-        border-radius: 10px;
+    /* Premium Dark Theme */
+    .stApp {
+        background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
     }
-    .status-active { color: #00ff00; }
-    .status-warming { color: #ffaa00; }
-    .status-banned { color: #ff0000; }
-    .status-paused { color: #888888; }
+    
+    .stMetric {
+        background: linear-gradient(145deg, #1e1e3f, #252550);
+        padding: 20px;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    
+    .magic-card {
+        background: linear-gradient(145deg, #1a1a3e, #252560);
+        padding: 30px;
+        border-radius: 20px;
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        box-shadow: 0 8px 32px rgba(99, 102, 241, 0.15);
+        margin: 20px 0;
+    }
+    
+    .success-glow {
+        animation: glow 2s ease-in-out infinite alternate;
+    }
+    
+    @keyframes glow {
+        from { box-shadow: 0 0 10px #00ff88; }
+        to { box-shadow: 0 0 30px #00ff88; }
+    }
+    
+    .status-active { color: #00ff88; font-weight: bold; }
+    .status-warming { color: #ffc107; font-weight: bold; }
+    .status-banned { color: #ff4757; font-weight: bold; }
+    .status-paused { color: #747d8c; font-weight: bold; }
+    
+    /* Button styling */
+    .stButton > button {
+        background: linear-gradient(90deg, #6366f1, #8b5cf6);
+        border: none;
+        border-radius: 12px;
+        padding: 12px 24px;
+        font-weight: 600;
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(90deg, #8b5cf6, #a855f7);
+        transform: translateY(-2px);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,7 +111,7 @@ st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Navigation",
-    ["🏠 Dashboard", "👤 Accounts", "🔄 Warmup", "🎬 Videos", "🌐 Proxies", "📊 Logs", "⚙️ GeeLark"]
+    ["🏠 Dashboard", "✨ Magic Setup", "👤 Accounts", "🔐 Credentials", "🔄 Warmup", "🎬 Videos", "🌐 Proxies", "📊 Logs", "⚙️ GeeLark"]
 )
 
 
@@ -127,6 +167,129 @@ if page == "🏠 Dashboard":
         with col2:
             st.write(f"**Database Connected:** {'✅' if health['database_connected'] else '❌'}")
             st.write(f"**Last Check:** {health['timestamp'][:19]}")
+
+
+# ===========================
+# Magic Setup Page
+# ===========================
+
+elif page == "✨ Magic Setup":
+    st.title("✨ Magic Setup")
+    st.markdown("**Zero-touch automation**: Paste a proxy → Get a warmed TikTok account")
+    
+    st.markdown("""
+    <div class="magic-card">
+        <h3>🚀 What happens when you click "Launch":</h3>
+        <ol>
+            <li>Creates an <strong>Android 15</strong> cloud phone with your proxy</li>
+            <li>Installs <strong>TikTok</strong> from the official app store</li>
+            <li>Creates a <strong>new TikTok account</strong> with natural credentials</li>
+            <li>Stores credentials <strong>securely encrypted</strong></li>
+            <li>Starts the <strong>5-day warmup process</strong></li>
+        </ol>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Input form
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        proxy_string = st.text_input(
+            "🌐 Proxy String",
+            placeholder="socks5://user:pass@1.2.3.4:1337  or  host:port:user:pass",
+            help="Supports multiple formats: protocol://user:pass@host:port or host:port:user:pass"
+        )
+    
+    with col2:
+        name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
+    
+    if st.button("🚀 Launch Magic Setup", type="primary", use_container_width=True):
+        if not proxy_string:
+            st.warning("Please enter a proxy string")
+        else:
+            # Show progress
+            with st.status("🔮 Running automation...", expanded=True) as status:
+                st.write("📡 Sending request to API...")
+                
+                result = api_post("/accounts/full-setup", {
+                    "proxy_string": proxy_string,
+                    "name_prefix": name_prefix or "",
+                    "max_retries": 5
+                })
+                
+                if result:
+                    # Show steps
+                    for step in result.get("steps_completed", []):
+                        icon = "✅" if step["status"] == "complete" else "🔄" if step["status"] == "running" else "❌"
+                        st.write(f"{icon} {step['step']}")
+                    
+                    if result.get("success"):
+                        status.update(label="✅ Setup Complete!", state="complete")
+                        
+                        st.balloons()
+                        
+                        st.success(f"""
+                        **Account Created Successfully!**
+                        - Account ID: `{result.get('account_id')}`
+                        - Phone ID: `{result.get('phone_id')}`
+                        """)
+                        
+                        if result.get("credentials"):
+                            creds = result["credentials"]
+                            st.info(f"""
+                            **Credentials (also saved to secure vault)**
+                            - Username: `{creds['username']}`
+                            - Email: `{creds['email']}`
+                            - Password: `{creds['password']}`
+                            """)
+                    else:
+                        status.update(label="❌ Setup Failed", state="error")
+                        st.error(f"Error: {result.get('error')}")
+                else:
+                    status.update(label="❌ API Error", state="error")
+    
+    st.markdown("---")
+    st.caption("💡 Tip: Use static residential proxies for best results. Each proxy should be unique.")
+
+
+# ===========================
+# Credentials Page
+# ===========================
+
+elif page == "🔐 Credentials":
+    st.title("🔐 Secure Credentials Vault")
+    st.markdown("View all stored TikTok account credentials")
+    
+    st.warning("⚠️ **Security Notice**: These are decrypted credentials. Handle with care.")
+    
+    credentials = api_get("/credentials")
+    
+    if credentials:
+        # Create DataFrame
+        df = pd.DataFrame([{
+            "Account ID": c["account_id"],
+            "Username": c["username"],
+            "Email": c["email"],
+            "Password": c["password"],
+            "Phone ID": c.get("phone_id", "N/A"),
+            "Created": c.get("created_at", "")[:19] if c.get("created_at") else ""
+        } for c in credentials])
+        
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Export button
+        if st.button("📥 Export as CSV"):
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name="tiktok_credentials.csv",
+                mime="text/csv"
+            )
+    else:
+        st.info("No credentials stored yet. Use Magic Setup to create accounts!")
 
 
 # ===========================

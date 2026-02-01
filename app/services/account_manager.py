@@ -372,3 +372,493 @@ class AccountManager:
         if action_type:
             query = query.filter(ActivityLog.action_type == action_type)
         return query.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+    
+    # ===========================
+    # Full Automation Setup
+    # ===========================
+    
+    def full_automation_setup(
+        self,
+        proxy_string: str,
+        name_prefix: str = "",
+        max_username_retries: int = 5,
+        callback: callable = None
+    ) -> Dict[str, Any]:
+        """
+        Complete zero-touch automation: Proxy → Phone → TikTok → Account → Warmup.
+        
+        Args:
+            proxy_string: Proxy in format "protocol://user:pass@host:port" 
+                         or "host:port:user:pass"
+            name_prefix: Optional prefix for the account name
+            max_username_retries: Max attempts if username is taken
+            callback: Optional function to call with status updates
+            
+        Returns:
+            Dict with status, account_id, credentials, and any errors
+        """
+        from app.services.credential_generator import generate_credentials
+        from app.services.credential_vault import get_vault
+        import time
+        
+        result = {
+            "success": False,
+            "steps_completed": [],
+            "account_id": None,
+            "phone_id": None,
+            "credentials": None,
+            "error": None
+        }
+        
+        def update_status(step: str, status: str = "running"):
+            result["steps_completed"].append({"step": step, "status": status})
+            if callback:
+                callback(step, status)
+            logger.info(f"Automation step [{status}]: {step}")
+        
+        try:
+            # Step 1: Parse and create proxy
+            update_status("Parsing proxy configuration")
+            proxy = self._parse_and_create_proxy(proxy_string)
+            if not proxy:
+                raise Exception("Failed to parse proxy string")
+            update_status("Proxy created", "complete")
+            
+            # Step 2: Create cloud phone with Android 15
+            update_status("Creating Android 15 cloud phone")
+            phone_name = f"TikTok_{name_prefix}_{datetime.now().strftime('%m%d_%H%M')}"
+            
+            response = self.geelark.create_single_phone(
+                name=phone_name,
+                proxy_string=proxy_string,
+                mobile_type="Android 15",  # Latest Android
+                region="USA-US",
+                language="default"
+            )
+            
+            if not response.success:
+                # Fallback to Android 12 if 15 not available
+                response = self.geelark.create_single_phone(
+                    name=phone_name,
+                    proxy_string=proxy_string,
+                    mobile_type="Android 12",
+                    region="USA-US",
+                    language="default"
+                )
+            
+            if not response.success:
+                raise Exception(f"Failed to create phone: {response.message}")
+            
+            phone_id = response.data.get("phoneId") or response.data.get("id")
+            result["phone_id"] = phone_id
+            update_status("Phone created", "complete")
+            
+            # Step 3: Start the phone
+            update_status("Starting cloud phone")
+            start_response = self.geelark.start_phones([phone_id])
+            if not start_response.success:
+                raise Exception(f"Failed to start phone: {start_response.message}")
+            
+            # Wait for phone to boot
+            time.sleep(15)
+            update_status("Phone started", "complete")
+            
+            # Step 4: Install TikTok
+            update_status("Installing TikTok")
+            install_response = self.geelark.install_tiktok(phone_id)
+            if not install_response.success:
+                raise Exception(f"Failed to install TikTok: {install_response.message}")
+            
+            # Wait for installation
+            time.sleep(10)
+            update_status("TikTok installed", "complete")
+            
+            # Step 5: Generate credentials and create TikTok account
+            update_status("Creating TikTok account")
+            
+            account_created = False
+            credentials = None
+            
+            for attempt in range(max_username_retries):
+                username, email, password = generate_credentials(name_prefix)
+                
+                # Use GeeLark's login/registration RPA
+                login_response = self.geelark.run_tiktok_login(
+                    phone_id=phone_id,
+                    login_type=1,  # Email registration
+                    email=email,
+                    password=password
+                )
+                
+                if login_response.success:
+                    credentials = {
+                        "username": username,
+                        "email": email,
+                        "password": password
+                    }
+                    account_created = True
+                    break
+                elif "already taken" in str(login_response.message).lower():
+                    logger.warning(f"Username {username} taken, retrying... ({attempt + 1}/{max_username_retries})")
+                    continue
+                else:
+                    # Other error - might need to wait or handle differently
+                    time.sleep(5)
+            
+            if not account_created:
+                raise Exception(f"Failed to create TikTok account after {max_username_retries} attempts")
+            
+            result["credentials"] = credentials
+            update_status("TikTok account created", "complete")
+            
+            # Step 6: Create account in our database
+            update_status("Saving to database")
+            account = Account(
+                geelark_profile_id=phone_id,
+                geelark_profile_name=phone_name,
+                tiktok_username=credentials["username"],
+                email=credentials["email"],
+                password=credentials["password"],
+                status=AccountStatus.WARMING_UP,
+                proxy_id=proxy.id,
+                warmup_day=1
+            )
+            
+            proxy.is_assigned = True
+            self.db.add(account)
+            self.db.commit()
+            self.db.refresh(account)
+            
+            result["account_id"] = account.id
+            update_status("Database record created", "complete")
+            
+            # Step 7: Store credentials in vault
+            update_status("Securing credentials")
+            vault = get_vault()
+            vault.store_credential(
+                account_id=account.id,
+                username=credentials["username"],
+                email=credentials["email"],
+                password=credentials["password"],
+                phone_id=phone_id,
+                extra={"proxy": proxy_string}
+            )
+            update_status("Credentials secured", "complete")
+            
+            # Step 8: Start warmup
+            update_status("Starting warmup process")
+            warmup_response = self.geelark.run_tiktok_warmup(
+                phone_id=phone_id,
+                duration_minutes=20
+            )
+            
+            if warmup_response.success:
+                self._log_activity(account.id, "warmup_started", {
+                    "day": 1,
+                    "duration": 20
+                })
+            update_status("Warmup initiated", "complete")
+            
+            # Log the full automation
+            self._log_activity(account.id, "full_automation_complete", {
+                "phone_id": phone_id,
+                "username": credentials["username"],
+                "steps": len(result["steps_completed"])
+            })
+            
+            result["success"] = True
+            update_status("Automation complete!", "success")
+            
+        except Exception as e:
+            result["error"] = str(e)
+            result["steps_completed"].append({"step": "Error", "status": str(e)})
+            logger.error(f"Full automation failed: {e}")
+        
+        return result
+    
+    def _parse_and_create_proxy(self, proxy_string: str) -> Optional[Proxy]:
+        """Parse proxy string and create in database."""
+        try:
+            # Handle different formats
+            # Format 1: protocol://user:pass@host:port
+            # Format 2: host:port:user:pass
+            # Format 3: host:port
+            
+            protocol = "HTTP"
+            host = port = username = password = None
+            
+            if "://" in proxy_string:
+                # URL format
+                parts = proxy_string.split("://")
+                protocol = parts[0].upper()
+                rest = parts[1]
+                
+                if "@" in rest:
+                    auth, host_port = rest.rsplit("@", 1)
+                    if ":" in auth:
+                        username, password = auth.split(":", 1)
+                    host, port = host_port.rsplit(":", 1)
+                else:
+                    host, port = rest.rsplit(":", 1)
+            else:
+                # Colon-separated format
+                parts = proxy_string.split(":")
+                if len(parts) >= 2:
+                    host = parts[0]
+                    port = parts[1]
+                if len(parts) >= 4:
+                    username = parts[2]
+                    password = parts[3]
+            
+            if not host or not port:
+                return None
+            
+            proxy = Proxy(
+                host=host,
+                port=int(port),
+                username=username,
+                password=password,
+                protocol=protocol,
+                is_assigned=False,
+                is_active=True
+            )
+            self.db.add(proxy)
+            self.db.commit()
+            self.db.refresh(proxy)
+            
+            return proxy
+            
+        except Exception as e:
+            logger.error(f"Failed to parse proxy: {e}")
+            return None
+    
+    # ===========================
+    # Ban Detection & Recovery
+    # ===========================
+    
+    def check_account_health(self, account_id: int) -> Dict[str, Any]:
+        """
+        Check if an account is banned or has issues.
+        
+        Returns:
+            Dict with health status and any detected issues
+        """
+        account = self.db.query(Account).filter(Account.id == account_id).first()
+        if not account or not account.geelark_profile_id:
+            return {"healthy": False, "error": "Account not found"}
+        
+        # Check phone status
+        status_response = self.geelark.get_phone_status([account.geelark_profile_id])
+        
+        result = {
+            "healthy": True,
+            "account_id": account_id,
+            "phone_status": None,
+            "issues": []
+        }
+        
+        if status_response.success and status_response.data:
+            phone_data = status_response.data[0] if status_response.data else {}
+            result["phone_status"] = phone_data.get("status")
+        
+        # Check recent activity logs for ban indicators
+        recent_logs = self.get_activity_logs(account_id=account_id, limit=10)
+        
+        ban_keywords = ["banned", "community guidelines", "violation", "suspended", "restricted"]
+        
+        for log in recent_logs:
+            if log.error_message:
+                for keyword in ban_keywords:
+                    if keyword in log.error_message.lower():
+                        result["healthy"] = False
+                        result["issues"].append({
+                            "type": "ban_detected",
+                            "message": log.error_message,
+                            "detected_at": log.created_at.isoformat()
+                        })
+                        break
+        
+        return result
+    
+    def handle_banned_account(
+        self, 
+        account_id: int,
+        auto_recover: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Handle a banned account with recovery options.
+        
+        Strategy:
+        1. First ban: Try creating new TikTok account on same phone
+        2. Second ban: Delete phone, create new phone with same proxy
+        
+        Args:
+            account_id: The banned account ID
+            auto_recover: Whether to attempt automatic recovery
+            
+        Returns:
+            Recovery result with new account info if successful
+        """
+        account = self.db.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            return {"success": False, "error": "Account not found"}
+        
+        # Get proxy info before we potentially delete things
+        proxy = self.db.query(Proxy).filter(Proxy.id == account.proxy_id).first()
+        proxy_string = f"{proxy.protocol.lower()}://{proxy.username}:{proxy.password}@{proxy.host}:{proxy.port}" if proxy else None
+        
+        # Check how many times this proxy has had bans
+        ban_count = self._get_proxy_ban_count(proxy.id) if proxy else 0
+        
+        result = {
+            "success": False,
+            "original_account_id": account_id,
+            "ban_count": ban_count,
+            "action_taken": None,
+            "new_account_id": None,
+            "new_phone_id": None
+        }
+        
+        # Mark current account as banned
+        self.mark_banned(account_id, "Community guidelines violation - auto-detected")
+        
+        if not auto_recover or not proxy_string:
+            result["action_taken"] = "marked_banned_only"
+            return result
+        
+        if ban_count < 2:
+            # First ban on this proxy - try new account on same phone
+            result["action_taken"] = "retry_account_creation"
+            
+            logger.info(f"First ban for proxy {proxy.id}, attempting new account on same phone")
+            
+            from app.services.credential_generator import generate_credentials
+            from app.services.credential_vault import get_vault
+            import time
+            
+            # Generate new credentials
+            for attempt in range(5):
+                username, email, password = generate_credentials()
+                
+                login_response = self.geelark.run_tiktok_login(
+                    phone_id=account.geelark_profile_id,
+                    login_type=1,
+                    email=email,
+                    password=password
+                )
+                
+                if login_response.success:
+                    # Create new account record
+                    new_account = Account(
+                        geelark_profile_id=account.geelark_profile_id,
+                        geelark_profile_name=account.geelark_profile_name,
+                        tiktok_username=username,
+                        email=email,
+                        password=password,
+                        status=AccountStatus.WARMING_UP,
+                        proxy_id=proxy.id,
+                        warmup_day=1,
+                        notes=f"Recovery account for banned #{account_id}"
+                    )
+                    
+                    self.db.add(new_account)
+                    self.db.commit()
+                    self.db.refresh(new_account)
+                    
+                    # Store credentials
+                    vault = get_vault()
+                    vault.store_credential(
+                        account_id=new_account.id,
+                        username=username,
+                        email=email,
+                        password=password,
+                        phone_id=account.geelark_profile_id,
+                        extra={"recovered_from": account_id}
+                    )
+                    
+                    # Start warmup
+                    self.geelark.run_tiktok_warmup(
+                        phone_id=account.geelark_profile_id,
+                        duration_minutes=20
+                    )
+                    
+                    self._log_activity(new_account.id, "account_recovered", {
+                        "original_account": account_id,
+                        "attempt": attempt + 1
+                    })
+                    
+                    result["success"] = True
+                    result["new_account_id"] = new_account.id
+                    logger.info(f"Recovery successful - new account {new_account.id}")
+                    return result
+                
+                time.sleep(3)
+            
+            # If we get here, account creation failed - treat as second ban
+            logger.warning(f"Account creation failed on phone, escalating to phone recreation")
+        
+        # Second ban or account creation failed - recreate phone
+        result["action_taken"] = "recreate_phone"
+        
+        logger.info(f"Second ban for proxy {proxy.id}, recreating phone")
+        
+        # Delete old phone
+        self.geelark.stop_phones([account.geelark_profile_id])
+        self.geelark.delete_phones([account.geelark_profile_id])
+        
+        # Create new phone with same proxy
+        recovery_result = self.full_automation_setup(
+            proxy_string=proxy_string,
+            name_prefix=f"Recovery_{account_id}"
+        )
+        
+        if recovery_result["success"]:
+            result["success"] = True
+            result["new_account_id"] = recovery_result["account_id"]
+            result["new_phone_id"] = recovery_result["phone_id"]
+            
+            self._log_activity(recovery_result["account_id"], "phone_recreated", {
+                "original_account": account_id,
+                "original_phone": account.geelark_profile_id
+            })
+        else:
+            result["error"] = recovery_result.get("error")
+        
+        return result
+    
+    def _get_proxy_ban_count(self, proxy_id: int) -> int:
+        """Count how many accounts on this proxy have been banned."""
+        return self.db.query(Account).filter(
+            Account.proxy_id == proxy_id,
+            Account.status == AccountStatus.BANNED
+        ).count()
+    
+    def run_health_check_all(self) -> List[Dict[str, Any]]:
+        """
+        Run health check on all active accounts.
+        
+        Called by scheduler to detect bans early.
+        """
+        accounts = self.db.query(Account).filter(
+            Account.status.in_([
+                AccountStatus.WARMING_UP, 
+                AccountStatus.ACTIVE, 
+                AccountStatus.POSTING
+            ])
+        ).all()
+        
+        results = []
+        
+        for account in accounts:
+            health = self.check_account_health(account.id)
+            
+            if not health["healthy"]:
+                logger.warning(f"Unhealthy account detected: {account.id}")
+                
+                # Attempt auto-recovery
+                recovery = self.handle_banned_account(account.id, auto_recover=True)
+                health["recovery_result"] = recovery
+            
+            results.append(health)
+        
+        return results

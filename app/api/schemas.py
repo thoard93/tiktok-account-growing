@@ -313,3 +313,34 @@ class TaskCancelRequest(BaseModel):
 
 class TaskRetryRequest(BaseModel):
     task_ids: List[str] = Field(..., max_length=100)
+
+
+# ===========================
+# Full Automation Schemas
+# ===========================
+
+class FullSetupRequest(BaseModel):
+    """Request for zero-touch automation setup."""
+    proxy_string: str = Field(..., description="Proxy in format 'host:port:user:pass' or 'protocol://user:pass@host:port'")
+    name_prefix: str = Field("", description="Optional prefix for account names")
+    max_retries: int = Field(5, ge=1, le=10, description="Max retries if username is taken")
+
+
+class FullSetupResponse(BaseModel):
+    """Response from full automation setup."""
+    success: bool
+    account_id: Optional[int] = None
+    phone_id: Optional[str] = None
+    credentials: Optional[Dict[str, str]] = None
+    steps_completed: List[Dict[str, str]] = []
+    error: Optional[str] = None
+
+
+class CredentialResponse(BaseModel):
+    """Stored credential information."""
+    account_id: int
+    username: str
+    email: str
+    password: str
+    phone_id: Optional[str] = None
+    created_at: str

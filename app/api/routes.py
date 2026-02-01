@@ -27,7 +27,8 @@ from app.api.schemas import (
     HealthResponse, DashboardStats,
     PhoneCreateRequest, PhoneStartRequest,
     TaskQueryRequest, TaskCancelRequest, TaskRetryRequest,
-    GeeLarkTaskResponse, GeeLarkTaskListResponse
+    GeeLarkTaskResponse, GeeLarkTaskListResponse,
+    FullSetupRequest, FullSetupResponse, CredentialResponse
 )
 
 router = APIRouter()
@@ -341,6 +342,78 @@ async def mark_account_banned(
     if manager.mark_banned(account_id, reason):
         return {"message": "Account marked as banned"}
     raise HTTPException(status_code=404, detail="Account not found")
+
+
+@router.post("/accounts/full-setup", response_model=FullSetupResponse, tags=["Accounts"])
+async def full_automation_setup(
+    data: FullSetupRequest,
+    manager: AccountManager = Depends(get_account_manager)
+):
+    """
+    🚀 Zero-touch automation: Proxy → Phone → TikTok → Account → Warmup.
+    
+    Provide a proxy string and the system will:
+    1. Create an Android 15 cloud phone with the proxy
+    2. Install TikTok
+    3. Create a TikTok account with natural credentials
+    4. Store credentials securely
+    5. Start the warmup process
+    
+    If username is taken, retries with new credentials (up to max_retries times).
+    """
+    result = manager.full_automation_setup(
+        proxy_string=data.proxy_string,
+        name_prefix=data.name_prefix,
+        max_username_retries=data.max_retries
+    )
+    
+    return FullSetupResponse(**result)
+
+
+@router.get("/credentials", response_model=List[CredentialResponse], tags=["Accounts"])
+async def list_credentials():
+    """
+    Get all stored credentials from the secure vault.
+    
+    WARNING: Returns decrypted credentials. Use with caution.
+    """
+    from app.services.credential_vault import get_vault
+    
+    vault = get_vault()
+    credentials = vault.get_all_credentials()
+    
+    return [
+        CredentialResponse(
+            account_id=c["account_id"],
+            username=c["username"],
+            email=c["email"],
+            password=c["password"],
+            phone_id=c.get("phone_id"),
+            created_at=c.get("created_at", "")
+        )
+        for c in credentials
+    ]
+
+
+@router.get("/credentials/{account_id}", response_model=CredentialResponse, tags=["Accounts"])
+async def get_credential(account_id: int):
+    """Get credentials for a specific account."""
+    from app.services.credential_vault import get_vault
+    
+    vault = get_vault()
+    cred = vault.get_credential(account_id)
+    
+    if not cred:
+        raise HTTPException(status_code=404, detail="Credentials not found")
+    
+    return CredentialResponse(
+        account_id=cred["account_id"],
+        username=cred["username"],
+        email=cred["email"],
+        password=cred["password"],
+        phone_id=cred.get("phone_id"),
+        created_at=cred.get("created_at", "")
+    )
 
 
 # ===========================
