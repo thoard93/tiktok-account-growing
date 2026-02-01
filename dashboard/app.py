@@ -10,8 +10,8 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api")
+# Configuration - Use Render API URL as default
+API_BASE_URL = os.getenv("API_BASE_URL", "https://tiktok-automation-api-4o6b.onrender.com/api")
 
 st.set_page_config(
     page_title="TikTok Automation",
