@@ -193,6 +193,10 @@ page = st.sidebar.radio(
     ["🏠 Dashboard", "✨ Magic Setup", "👤 Accounts", "🔐 Credentials", "🔄 Warmup", "🎬 Videos", "🌐 Proxies", "📊 Logs", "⚙️ GeeLark"]
 )
 
+# Version footer - update on each deploy
+st.sidebar.markdown("---")
+st.sidebar.caption("v0.2.0 - Async Magic Setup")
+
 
 # ===========================
 # Dashboard Page
