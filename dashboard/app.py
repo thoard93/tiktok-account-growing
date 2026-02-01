@@ -195,7 +195,7 @@ page = st.sidebar.radio(
 
 # Version footer - update on each deploy
 st.sidebar.markdown("---")
-st.sidebar.caption("v0.2.0 - Async Magic Setup")
+st.sidebar.caption("v0.3.0 - Form-based Magic Setup")
 
 
 # ===========================
