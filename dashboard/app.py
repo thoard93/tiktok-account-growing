@@ -326,7 +326,7 @@ elif page == "✨ Magic Setup":
                         task_status = api_get(f"/tasks/{task_id}")
                         
                         if task_status:
-                            progress = task_status.get("progress", 0)
+                            progress = int(task_status.get("progress", 0) or 0)
                             current_step = task_status.get("current_step", "Working...")
                             status = task_status.get("status", "running")
                             
