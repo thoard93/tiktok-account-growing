@@ -452,22 +452,24 @@ class AccountManager:
             # Debug: Log the response to understand structure
             logger.info(f"Phone creation response data: {response.data}")
             
-            # Extract phone ID from response - handle different response formats
+            # Extract phone ID from response - GeeLark returns in details array
             phone_id = None
             if isinstance(response.data, dict):
-                phone_id = response.data.get("phoneId") or response.data.get("id")
-                # Check if it's in a nested list (batch create returns list)
-                if not phone_id and "data" in response.data:
-                    data_list = response.data.get("data", [])
-                    if data_list and isinstance(data_list, list):
-                        phone_id = data_list[0].get("phoneId") or data_list[0].get("id")
+                # Check details array first (batch create response format)
+                details = response.data.get("details", [])
+                if details and isinstance(details, list) and len(details) > 0:
+                    phone_id = details[0].get("id")
+                # Fallback to top-level fields
+                if not phone_id:
+                    phone_id = response.data.get("phoneId") or response.data.get("id")
             elif isinstance(response.data, list) and response.data:
-                phone_id = response.data[0].get("phoneId") or response.data[0].get("id")
+                phone_id = response.data[0].get("id")
             
             if not phone_id:
                 raise Exception(f"Could not extract phone ID from response: {response.data}")
             
             logger.info(f"Extracted phone_id: {phone_id}")
+
             result["phone_id"] = phone_id
             update_status("Phone created", "complete")
             
