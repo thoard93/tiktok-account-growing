@@ -537,54 +537,148 @@ class AccountManager:
             time.sleep(10)
             update_status("TikTok installed", "complete")
             
-            # Step 5: Generate credentials and create TikTok account
-            update_status("Creating TikTok account")
+            # Step 5: Register TikTok account via SMS verification
+            update_status("Requesting SMS verification number")
+            
+            from app.services.sms_activate import get_sms_client
+            sms_client = get_sms_client()
             
             account_created = False
             credentials = None
+            sms_number = None
             
-            for attempt in range(max_username_retries):
-                username, email, password = generate_credentials(name_prefix)
+            if not sms_client:
+                # Fallback: Skip registration, just do guest warmup
+                logger.warning("SMS-Activate not configured - skipping account registration")
+                update_status("SMS service not configured - using guest mode", "warning")
+                credentials = {
+                    "username": None,
+                    "email": None,
+                    "password": None,
+                    "phone": None,
+                    "guest_mode": True
+                }
+                account_created = True
+            else:
+                # Get balance first
+                balance = sms_client.get_balance()
+                if balance < 0.50:
+                    logger.warning(f"Low SMS-Activate balance: ${balance:.2f}")
+                    update_status(f"Low SMS balance: ${balance:.2f}", "warning")
                 
-                # Use GeeLark's login/registration RPA
-                login_response = self.geelark.run_tiktok_login(
-                    phone_ids=[phone_id],
-                    credentials=[{"email": email, "password": password}]
-                )
-
-                
-                if login_response.success:
-                    credentials = {
-                        "username": username,
-                        "email": email,
-                        "password": password
-                    }
-                    account_created = True
-                    break
-                elif "already taken" in str(login_response.message).lower():
-                    logger.warning(f"Username {username} taken, retrying... ({attempt + 1}/{max_username_retries})")
-                    continue
-                else:
-                    # Other error - might need to wait or handle differently
-                    time.sleep(5)
+                for attempt in range(max_username_retries):
+                    try:
+                        # Request virtual phone number for TikTok
+                        update_status(f"Getting SMS number (attempt {attempt + 1})")
+                        sms_number = sms_client.get_number(service="tiktok", country="usa")
+                        
+                        if not sms_number:
+                            logger.warning(f"Failed to get SMS number, attempt {attempt + 1}")
+                            time.sleep(5)
+                            continue
+                        
+                        logger.info(f"Got SMS number: {sms_number.phone_number}")
+                        
+                        # Generate username and password
+                        username, _, password = generate_credentials(name_prefix)
+                        
+                        # Trigger TikTok registration RPA with phone number
+                        # Note: This requires GeeLark RPA configured for phone registration
+                        update_status(f"Registering with {sms_number.phone_number}")
+                        
+                        # Use custom RPA task for registration
+                        # The RPA should: Open TikTok > Sign up > Phone > Input number > Submit
+                        reg_response = self.geelark.add_task(
+                            phone_ids=[phone_id],
+                            task_type=42,  # Custom task type
+                            variables={
+                                "action": "tiktok_register",
+                                "phone_number": sms_number.phone_number,
+                                "username": username,
+                                "password": password
+                            }
+                        )
+                        
+                        if not reg_response.success:
+                            logger.warning(f"RPA registration failed: {reg_response.message}")
+                            sms_client.cancel_activation(sms_number.activation_id)
+                            continue
+                        
+                        # Wait for SMS code (TikTok sends verification)
+                        update_status("Waiting for SMS verification code...")
+                        code = sms_client.wait_for_code(
+                            sms_number.activation_id,
+                            timeout=180,  # 3 minutes
+                            poll_interval=5
+                        )
+                        
+                        if not code:
+                            logger.warning("No SMS code received")
+                            sms_client.cancel_activation(sms_number.activation_id)
+                            continue
+                        
+                        logger.info(f"Received SMS code: {code}")
+                        update_status(f"Got code: {code}, completing registration")
+                        
+                        # Input verification code via RPA
+                        verify_response = self.geelark.add_task(
+                            phone_ids=[phone_id],
+                            task_type=42,
+                            variables={
+                                "action": "input_verification_code",
+                                "code": code
+                            }
+                        )
+                        
+                        # Wait for verification to complete
+                        time.sleep(10)
+                        
+                        # Mark activation as complete
+                        sms_client.complete_activation(sms_number.activation_id)
+                        
+                        credentials = {
+                            "username": username,
+                            "email": None,
+                            "password": password,
+                            "phone": sms_number.phone_number,
+                            "guest_mode": False
+                        }
+                        account_created = True
+                        break
+                        
+                    except Exception as e:
+                        logger.error(f"Registration attempt {attempt + 1} failed: {e}")
+                        if sms_number:
+                            sms_client.cancel_activation(sms_number.activation_id)
+                        time.sleep(5)
             
             if not account_created:
-                raise Exception(f"Failed to create TikTok account after {max_username_retries} attempts")
+                raise Exception(f"Failed to register TikTok account after {max_username_retries} attempts")
             
             result["credentials"] = credentials
-            update_status("TikTok account created", "complete")
+            if credentials.get("guest_mode"):
+                update_status("Guest mode enabled (no account)", "complete")
+            else:
+                update_status("TikTok account registered", "complete")
+
             
             # Step 6: Create account in our database
             update_status("Saving to database")
+            
+            # Determine status based on guest mode
+            is_guest = credentials.get("guest_mode", False)
+            account_status = AccountStatus.WARMING_UP if not is_guest else AccountStatus.CREATED
+            
             account = Account(
                 geelark_profile_id=phone_id,
                 geelark_profile_name=phone_name,
-                tiktok_username=credentials["username"],
-                email=credentials["email"],
-                password=credentials["password"],
-                status=AccountStatus.WARMING_UP,
+                tiktok_username=credentials.get("username"),
+                email=credentials.get("email"),
+                phone=credentials.get("phone"),
+                password=credentials.get("password"),
+                status=account_status,
                 proxy_id=proxy.id,
-                warmup_day=1
+                warmup_day=1 if not is_guest else 0
             )
             
             proxy.is_assigned = True
@@ -593,20 +687,28 @@ class AccountManager:
             self.db.refresh(account)
             
             result["account_id"] = account.id
+            result["guest_mode"] = is_guest
             update_status("Database record created", "complete")
             
-            # Step 7: Store credentials in vault
-            update_status("Securing credentials")
-            vault = get_vault()
-            vault.store_credential(
-                account_id=account.id,
-                username=credentials["username"],
-                email=credentials["email"],
-                password=credentials["password"],
-                phone_id=phone_id,
-                extra={"proxy": proxy_string}
-            )
-            update_status("Credentials secured", "complete")
+            # Step 7: Store credentials in vault (skip for guest mode)
+            if not is_guest:
+                update_status("Securing credentials")
+                vault = get_vault()
+                vault.store_credential(
+                    account_id=account.id,
+                    username=credentials.get("username"),
+                    email=credentials.get("email"),
+                    password=credentials.get("password"),
+                    phone_id=phone_id,
+                    extra={
+                        "proxy": proxy_string,
+                        "phone": credentials.get("phone")
+                    }
+                )
+                update_status("Credentials secured", "complete")
+            else:
+                update_status("Skipped credential vault (guest mode)", "complete")
+
             
             # Step 8: Start warmup
             update_status("Starting warmup process")
