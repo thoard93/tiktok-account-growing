@@ -422,14 +422,10 @@ def run_magic_setup_background(
     from app.services.task_tracker import update_task, TaskStatus
     from app.services.account_manager import AccountManager
     from app.database import SessionLocal
-    import os
     
-    # Create fresh database session and GeeLark client for this background task
+    # Create fresh database session and reuse the get_geelark_client helper
     db = SessionLocal()
-    geelark = GeeLarkClient(
-        app_id=os.getenv("GEELARK_APP_ID", ""),
-        app_key=os.getenv("GEELARK_APP_KEY", "")
-    )
+    geelark = get_geelark_client()  # Use the properly configured client
     
     try:
         update_task(task_id, status=TaskStatus.RUNNING, progress=5, current_step="Initializing...")
