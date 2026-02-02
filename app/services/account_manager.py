@@ -540,17 +540,21 @@ class AccountManager:
             # Step 5: Register TikTok account via SMS verification
             update_status("Requesting SMS verification number")
             
+            # Check if SMS purchase should be skipped (use existing numbers manually)
+            skip_sms = os.getenv("SKIP_SMS_PURCHASE", "false").lower() == "true"
+            
             from app.services.sms_activate import get_sms_client
-            sms_client = get_sms_client()
+            sms_client = get_sms_client() if not skip_sms else None
             
             account_created = False
             credentials = None
             sms_number = None
             
-            if not sms_client:
+            if not sms_client or skip_sms:
                 # Fallback: Skip registration, just do guest warmup
-                logger.warning("SMS-Activate not configured - skipping account registration")
-                update_status("SMS service not configured - using guest mode", "warning")
+                reason = "SKIP_SMS_PURCHASE=true" if skip_sms else "SMS service not configured"
+                logger.warning(f"{reason} - skipping auto SMS purchase")
+                update_status(f"SMS skipped - use existing numbers manually", "warning")
                 credentials = {
                     "username": None,
                     "email": None,
