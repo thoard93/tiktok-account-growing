@@ -45,6 +45,17 @@ st.markdown("""
         background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
     }
     
+    /* Make sidebar collapse button visible */
+    [data-testid="collapsedControl"] {
+        color: white !important;
+        background: #6366f1 !important;
+        border-radius: 8px !important;
+    }
+    
+    button[kind="headerNoPadding"] {
+        color: white !important;
+    }
+    
     .stMetric {
         background: linear-gradient(145deg, #1e1e3f, #252550);
         padding: 20px;
