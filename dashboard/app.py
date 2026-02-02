@@ -157,7 +157,66 @@ st.markdown("""
     .streamlit-expanderHeader {
         color: #ffffff !important;
     }
+    
+    /* ===== MOBILE RESPONSIVE STYLES ===== */
+    @media (max-width: 768px) {
+        /* Collapse sidebar by default on mobile */
+        [data-testid="stSidebar"] {
+            min-width: 0px !important;
+            max-width: 0px !important;
+            transform: translateX(-100%);
+        }
+        
+        [data-testid="stSidebar"][aria-expanded="true"] {
+            min-width: 250px !important;
+            max-width: 250px !important;
+            transform: translateX(0);
+        }
+        
+        /* Larger buttons for touch */
+        .stButton > button {
+            padding: 16px 24px !important;
+            font-size: 16px !important;
+            min-height: 52px !important;
+            width: 100% !important;
+        }
+        
+        /* Full-width inputs */
+        .stTextInput, .stSelectbox, .stMultiSelect, .stNumberInput {
+            width: 100% !important;
+        }
+        
+        /* Stack columns vertically */
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 100% !important;
+            min-width: 100% !important;
+        }
+        
+        /* Larger touch targets for multiselect */
+        .stMultiSelect [data-baseweb="tag"] {
+            padding: 8px 12px !important;
+            font-size: 14px !important;
+        }
+        
+        /* Bigger text for readability */
+        .stMarkdown p, .stText {
+            font-size: 16px !important;
+        }
+        
+        /* Make metrics stack nicely */
+        .stMetric {
+            padding: 15px !important;
+            margin-bottom: 10px !important;
+        }
+        
+        /* Full-width progress bar */
+        .stProgress {
+            width: 100% !important;
+        }
+    }
 </style>
+
 """, unsafe_allow_html=True)
 
 
@@ -870,37 +929,72 @@ elif page == "⚙️ GeeLark":
             
             st.markdown("---")
             
-            # Warmup Controls - Easy selection!
-            st.subheader("🔥 Run Warmup on Any Phone")
+            # Warmup Controls - Multi-select + Warmup Modes
+            st.subheader("🔥 Run Warmup on Selected Phones")
             
             # Create dropdown options from phone list
             phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
             
-            col1, col2, col3 = st.columns([2, 1, 1])
+            # Multi-select for phones (mobile-friendly: full width)
+            selected_phones = st.multiselect(
+                "Select Phones (can pick multiple)", 
+                options=list(phone_options.keys()),
+                help="Pick one or more phones to run warmup"
+            )
+            
+            # Settings in columns (stacks on mobile)
+            col1, col2 = st.columns(2)
             with col1:
-                selected_phone = st.selectbox(
-                    "Select Phone", 
-                    options=list(phone_options.keys()),
-                    help="Pick a phone to run teamwork warmup"
+                warmup_mode = st.selectbox(
+                    "Warmup Mode",
+                    options=["🎯 Teamwork Trend (Recommended)", "📱 General FYP Browse"],
+                    help="Teamwork: Searches 'teamwork trend' keywords. General: Just browses FYP."
                 )
             with col2:
                 warmup_duration = st.number_input("Duration (min)", min_value=10, max_value=120, value=30)
-            with col3:
-                st.write("")  # Spacer
-                st.write("")
-                if st.button("🔥 Run Warmup", type="primary"):
-                    if selected_phone:
-                        phone_id = phone_options[selected_phone]
+            
+            # Big mobile-friendly button
+            if st.button("🔥 Run Warmup on Selected", type="primary", use_container_width=True):
+                if selected_phones:
+                    successes = []
+                    failures = []
+                    
+                    # Determine warmup action based on mode
+                    if "Teamwork" in warmup_mode:
+                        action = "search video"
+                        keywords = ["teamwork trend", "teamwork challenge", "teamwork goals", "teamwork makes the dream work"]
+                    else:
+                        action = "browse video"
+                        keywords = None
+                    
+                    # Progress bar for batch
+                    progress = st.progress(0, text="Starting warmups...")
+                    
+                    for i, phone_name in enumerate(selected_phones):
+                        phone_id = phone_options[phone_name]
                         result = api_post("/geelark/warmup/run", {
                             "phone_id": phone_id,
-                            "duration_minutes": warmup_duration
+                            "duration_minutes": warmup_duration,
+                            "action": action,
+                            "keywords": keywords
                         })
+                        
                         if result and result.get("success"):
-                            st.success(f"Warmup started on {selected_phone}!")
+                            successes.append(phone_name)
                         else:
-                            st.error(f"Failed: {result.get('message', 'Unknown error') if result else 'API error'}")
+                            failures.append(f"{phone_name}: {result.get('message', 'Unknown') if result else 'API error'}")
+                        
+                        progress.progress((i + 1) / len(selected_phones), text=f"Started {i + 1}/{len(selected_phones)}")
+                    
+                    # Show results
+                    if successes:
+                        st.success(f"✅ Warmup started on {len(successes)} phone(s): {', '.join(successes)}")
+                    if failures:
+                        st.error(f"❌ Failed: {'; '.join(failures)}")
+                else:
+                    st.warning("Please select at least one phone!")
             
-            st.caption("💡 To stop a warmup, go to **Task History** tab and cancel the task, or use **Task Management** tab.")
+            st.caption("💡 **Teamwork Mode** searches for teamwork content. **General** just browses FYP. Stop warmups in Task History tab.")
         else:
             st.info("No phones found in GeeLark. Create some phones first!")
     

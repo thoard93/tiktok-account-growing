@@ -852,18 +852,23 @@ async def run_warmup_on_phone(
     Args:
         phone_id: The GeeLark phone ID
         duration_minutes: Warmup duration (default 30)
+        action: "browse video" or "search video" (default browse)
+        keywords: List of search keywords for search mode
     """
     phone_id = data.get("phone_id")
     duration = data.get("duration_minutes", 30)
+    action = data.get("action", "browse video")
+    keywords = data.get("keywords")
     
     if not phone_id:
         raise HTTPException(status_code=400, detail="phone_id is required")
     
-    # Run warmup using GeeLark's built-in warmup (browse video action)
+    # Run warmup with specified mode
     response = geelark.run_tiktok_warmup(
         phone_ids=[phone_id],
         duration_minutes=duration,
-        action="browse video"  # Default to browsing FYP
+        action=action,
+        keywords=keywords
     )
     
     return {
