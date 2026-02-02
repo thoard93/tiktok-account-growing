@@ -47,15 +47,20 @@ class SMSClient:
     # Fallback order: hero-sms.com, then get-sms.com (compatible API)
     BASE_URL = "https://hero-sms.com/stubs/handler_api.php"
     
-    # Service codes for popular platforms
+    # Service codes - TikTok has multiple possible codes depending on provider
+    # We'll try these in order until one works
+    TIKTOK_SERVICE_CODES = ["tiktok", "douyin", "tt", "dy", "lf", "tk"]
+    
+    # Primary service codes for popular platforms
     SERVICES = {
-        "tiktok": "lf",      # TikTok service code
+        "tiktok": "tiktok",   # Try this first, fallback to others
         "instagram": "ig",
         "facebook": "fb",
         "google": "go",
         "telegram": "tg",
         "whatsapp": "wa",
     }
+
     
     # Country codes (from HeroSMS API - use getCountries to verify)
     # Note: USA is typically country 12, but may vary
@@ -126,64 +131,67 @@ class SMSClient:
     ) -> Optional[SMSNumber]:
         """
         Request a virtual phone number for SMS verification.
-        
-        Args:
-            service: Service name (tiktok, instagram, etc.)
-            country: Country code (usa, uk, canada, etc.)
-            max_price: Maximum price in USD (optional)
-            
-        Returns:
-            SMSNumber object with activation_id and phone_number, or None if failed
+        For TikTok, tries multiple service codes until one works.
         """
-        service_code = self.SERVICES.get(service.lower(), service)
         country_code = self.COUNTRIES.get(country.lower(), country)
         
-        params = {
-            "action": "getNumber",
-            "service": service_code,
-            "country": country_code,
-        }
+        # For TikTok, try multiple service codes (different providers use different codes)
+        if service.lower() == "tiktok":
+            service_codes_to_try = self.TIKTOK_SERVICE_CODES
+        else:
+            service_codes_to_try = [self.SERVICES.get(service.lower(), service)]
         
-        if max_price:
-            params["maxPrice"] = max_price
-        
-        logger.info(f"Requesting {service} number for country {country}...")
-        result = self._make_request(params)
-        
-        # Response format: ACCESS_NUMBER:activation_id:phone_number
-        if result.startswith("ACCESS_NUMBER:"):
-            parts = result.split(":")
-            activation_id = parts[1]
-            phone_number = parts[2]
+        for service_code in service_codes_to_try:
+            params = {
+                "action": "getNumber",
+                "service": service_code,
+                "country": country_code,
+            }
             
-            # Format phone number (add + if not present)
-            if not phone_number.startswith("+"):
-                phone_number = f"+{phone_number}"
+            if max_price:
+                params["maxPrice"] = max_price
             
-            logger.info(f"Got number: {phone_number} (ID: {activation_id})")
+            logger.info(f"Trying service code '{service_code}' for {country}...")
             
-            return SMSNumber(
-                activation_id=activation_id,
-                phone_number=phone_number,
-                country=country,
-                service=service,
-                provider="herosms",
-                status="waiting"
-            )
+            try:
+                result = self._make_request(params)
+            except Exception as e:
+                logger.warning(f"Request failed for code '{service_code}': {e}")
+                continue
+            
+            # Response format: ACCESS_NUMBER:activation_id:phone_number
+            if result.startswith("ACCESS_NUMBER:"):
+                parts = result.split(":")
+                activation_id = parts[1]
+                phone_number = parts[2]
+                
+                # Format phone number (add + if not present)
+                if not phone_number.startswith("+"):
+                    phone_number = f"+{phone_number}"
+                
+                logger.info(f"SUCCESS with code '{service_code}': {phone_number} (ID: {activation_id})")
+                
+                return SMSNumber(
+                    activation_id=activation_id,
+                    phone_number=phone_number,
+                    country=country,
+                    service=service,
+                    provider="herosms",
+                    status="waiting"
+                )
+            
+            # Check if it's a "no numbers" error - try next code
+            if result in ["NO_NUMBERS", "NO_NUMBERS_AVAILABLE"]:
+                logger.warning(f"No numbers for code '{service_code}', trying next...")
+                continue
+            
+            # For other errors, log and try next
+            logger.warning(f"Code '{service_code}' returned: {result}")
         
-        # Handle errors
-        error_messages = {
-            "NO_NUMBERS": "No numbers available for this service/country",
-            "NO_BALANCE": "Insufficient balance",
-            "BAD_SERVICE": "Invalid service code",
-            "BAD_KEY": "Invalid API key",
-            "ERROR_SQL": "Server error",
-            "NO_ACTIVATION": "Activation not found",
-        }
-        
-        error_msg = error_messages.get(result, f"Unknown error: {result}")
-        logger.error(f"Failed to get number: {error_msg}")
+        # All codes failed
+        logger.error(f"All service codes failed for {service} in {country}")
         return None
+
     
     def get_status(self, activation_id: str) -> Tuple[str, Optional[str]]:
         """
