@@ -106,10 +106,10 @@ class GeeLarkClient:
     }
     
     # Task Type Constants (from API docs)
-    # Note: Marketplace templates may use string names, not numeric IDs
+    # Note: GeeLark API requires numeric taskType (int)
     TASK_TYPES = {
         "TIKTOK_VIDEO_POSTING": 1,
-        "TIKTOK_AI_WARMUP": "TikTok AI account warmup",  # String name for Marketplace template
+        "TIKTOK_AI_WARMUP": 2,
         "TIKTOK_CAROUSEL_POSTING": 3,
         "TIKTOK_ACCOUNT_LOGIN": 4,
         "TIKTOK_PROFILE_EDITING": 6,
@@ -1020,15 +1020,12 @@ class GeeLarkClient:
             max_comments: Maximum comments per session
             schedule_at: Scheduled time (timestamp)
         """
-        # GeeLark AI warmup variables - duration goes directly in list item
-        variables = {
-            "duration": duration_minutes
-        }
-        
+        # Try with NO variables - let GeeLark use its default warmup settings
+        # If this fails, we need to use a Custom Canvas flow instead
         return self.add_task(
             phone_ids=phone_ids,
             task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
-            variables=variables,
+            variables=None,  # No custom vars - use GeeLark defaults
             schedule_at=schedule_at
         )
     
