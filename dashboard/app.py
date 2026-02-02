@@ -160,17 +160,31 @@ st.markdown("""
     
     /* ===== MOBILE RESPONSIVE STYLES ===== */
     @media (max-width: 768px) {
-        /* Collapse sidebar by default on mobile */
+        /* Fix sidebar for iOS - proper sizing and touch targets */
         [data-testid="stSidebar"] {
-            min-width: 0px !important;
-            max-width: 0px !important;
-            transform: translateX(-100%);
+            width: 280px !important;
+            min-width: 280px !important;
+            max-width: 280px !important;
         }
         
-        [data-testid="stSidebar"][aria-expanded="true"] {
-            min-width: 250px !important;
-            max-width: 250px !important;
-            transform: translateX(0);
+        /* Make sidebar nav items touch-friendly */
+        [data-testid="stSidebar"] .stRadio > div {
+            gap: 8px !important;
+        }
+        
+        [data-testid="stSidebar"] .stRadio label {
+            padding: 14px 16px !important;
+            min-height: 48px !important;
+            font-size: 16px !important;
+            display: flex !important;
+            align-items: center !important;
+            margin-bottom: 4px !important;
+            border-radius: 8px !important;
+            background: rgba(255,255,255,0.05) !important;
+        }
+        
+        [data-testid="stSidebar"] .stRadio label:active {
+            background: rgba(99, 102, 241, 0.3) !important;
         }
         
         /* Larger buttons for touch */
@@ -179,6 +193,7 @@ st.markdown("""
             font-size: 16px !important;
             min-height: 52px !important;
             width: 100% !important;
+            -webkit-tap-highlight-color: transparent;
         }
         
         /* Full-width inputs */
@@ -195,8 +210,15 @@ st.markdown("""
         
         /* Larger touch targets for multiselect */
         .stMultiSelect [data-baseweb="tag"] {
-            padding: 8px 12px !important;
-            font-size: 14px !important;
+            padding: 10px 14px !important;
+            font-size: 15px !important;
+            min-height: 40px !important;
+        }
+        
+        /* Make multiselect dropdown items bigger */
+        [data-baseweb="popover"] li {
+            padding: 14px 16px !important;
+            min-height: 48px !important;
         }
         
         /* Bigger text for readability */
@@ -213,6 +235,19 @@ st.markdown("""
         /* Full-width progress bar */
         .stProgress {
             width: 100% !important;
+        }
+        
+        /* Tabs - bigger touch targets */
+        .stTabs [data-baseweb="tab"] {
+            padding: 12px 16px !important;
+            font-size: 14px !important;
+            min-height: 44px !important;
+        }
+        
+        /* Form submit buttons full width */
+        [data-testid="stFormSubmitButton"] button {
+            width: 100% !important;
+            min-height: 52px !important;
         }
     }
 </style>
