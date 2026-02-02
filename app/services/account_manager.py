@@ -750,7 +750,7 @@ class AccountManager:
             # Step 8: Start warmup
             update_status("Starting warmup process")
             warmup_response = self.geelark.run_tiktok_warmup(
-                phone_id=phone_id,
+                phone_ids=[phone_id],
                 duration_minutes=20
             )
             
@@ -993,7 +993,7 @@ class AccountManager:
                     
                     # Start warmup
                     self.geelark.run_tiktok_warmup(
-                        phone_id=account.geelark_profile_id,
+                        phone_ids=[account.geelark_profile_id],
                         duration_minutes=20
                     )
                     
