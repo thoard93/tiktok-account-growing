@@ -106,9 +106,10 @@ class GeeLarkClient:
     }
     
     # Task Type Constants (from API docs)
+    # Note: Marketplace templates may use string names, not numeric IDs
     TASK_TYPES = {
         "TIKTOK_VIDEO_POSTING": 1,
-        "TIKTOK_AI_WARMUP": 2,
+        "TIKTOK_AI_WARMUP": "TikTok AI account warmup",  # String name for Marketplace template
         "TIKTOK_CAROUSEL_POSTING": 3,
         "TIKTOK_ACCOUNT_LOGIN": 4,
         "TIKTOK_PROFILE_EDITING": 6,
@@ -930,7 +931,7 @@ class GeeLarkClient:
     def add_task(
         self,
         phone_ids: List[str],
-        task_type: int,
+        task_type,  # Can be int (built-in) or str (Marketplace template name)
         variables: Optional[Dict[str, Any]] = None,
         schedule_at: Optional[int] = None
     ) -> GeeLarkResponse:
@@ -939,7 +940,7 @@ class GeeLarkClient:
         
         Args:
             phone_ids: List of cloud phone IDs
-            task_type: Task type constant (use TASK_TYPES)
+            task_type: Task type - int for built-in, string for Marketplace template
             variables: Task-specific variables
             schedule_at: Scheduled time (timestamp in seconds)
         """
