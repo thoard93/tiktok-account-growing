@@ -1061,10 +1061,19 @@ elif page == "⚙️ GeeLark":
                 20122: "TikTok start failed",
                 20129: "Device offline",
                 20124: "Homepage timeout",
+                20109: "No network connection",
                 20008: "Language not English",
                 20003: "Execution timeout",
                 29999: "Unknown error"
             }
+            
+            # GeeLark pricing: $0.007/min (base rate)
+            COST_PER_MINUTE = 0.007
+            
+            def calc_usd_cost(cost_seconds):
+                if cost_seconds and isinstance(cost_seconds, (int, float)):
+                    return f"${(cost_seconds / 60 * COST_PER_MINUTE):.3f}"
+                return "-"
             
             df = pd.DataFrame([{
                 "Task ID": t["id"],
@@ -1072,10 +1081,16 @@ elif page == "⚙️ GeeLark":
                 "Phone": t["serialName"],
                 "Status": statuses.get(t["status"], "Unknown"),
                 "Fail Reason": fail_codes.get(t.get("failCode"), t.get("failDesc", "-")) if t["status"] == 4 else "-",
-                "Cost (s)": t.get("cost", "-")
+                "Time (s)": t.get("cost", "-"),
+                "Cost (USD)": calc_usd_cost(t.get("cost"))
             } for t in history["items"]])
             
             st.dataframe(df, use_container_width=True)
+            
+            # Show cost summary
+            total_seconds = sum(t.get("cost", 0) or 0 for t in history["items"])
+            total_usd = total_seconds / 60 * COST_PER_MINUTE
+            st.caption(f"💰 **Total usage shown:** {total_seconds:,}s ({total_seconds/60:.1f} min) = **${total_usd:.2f}** @ $0.007/min")
     
     with tab3:
         st.subheader("Task Management")
