@@ -442,6 +442,7 @@ elif page == "👤 Accounts":
                 "Name": a.get("geelark_profile_name", "N/A"),
                 "Status": a["status"],
                 "Username": a.get("tiktok_username", "-"),
+                "📱 Phone": a.get("phone", "-"),  # HeroSMS number for manual reg
                 "Followers": a["followers_count"],
                 "Posts": a["posts_count"],
                 "Warmup Day": a["warmup_day"],
