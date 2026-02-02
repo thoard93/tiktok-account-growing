@@ -859,13 +859,11 @@ async def run_warmup_on_phone(
     if not phone_id:
         raise HTTPException(status_code=400, detail="phone_id is required")
     
-    # Run warmup using GeeLark's built-in AI warmup
+    # Run warmup using GeeLark's built-in warmup (browse video action)
     response = geelark.run_tiktok_warmup(
         phone_ids=[phone_id],
         duration_minutes=duration,
-        max_likes=30,
-        max_follows=10,
-        max_comments=5
+        action="browse video"  # Default to browsing FYP
     )
     
     return {

@@ -980,30 +980,38 @@ class GeeLarkClient:
         self,
         phone_id: str,
         flow_id: str,
-        variables: Optional[Dict[str, Any]] = None
+        variables: Optional[Dict[str, Any]] = None,
+        schedule_at: Optional[int] = None
     ) -> GeeLarkResponse:
         """
         Run a custom RPA Canvas flow.
         
         Args:
-            phone_id: Cloud phone ID
+            phone_id: Cloud phone ID (envId)
             flow_id: Canvas flow ID from GeeLark marketplace/custom flows
             variables: Variables to pass to the flow
+            schedule_at: Scheduled time (timestamp in seconds)
         """
+        import time
+        
+        if schedule_at is None:
+            schedule_at = int(time.time())
+        
         task_list = [{
-            "phoneId": phone_id,
+            "envId": phone_id,  # API uses envId!
+            "scheduleAt": schedule_at,
             "flowId": flow_id
         }]
         
         if variables:
-            task_list[0]["variables"] = variables
+            task_list[0].update(variables)
         
         data = {
             "taskType": self.TASK_TYPES.get("CUSTOM", 42),
             "list": task_list
         }
         
-        logger.debug(f"Custom RPA payload: {data}")
+        logger.info(f"Custom RPA payload: {data}")
         
         return self._make_request(self.ENDPOINTS["task_add"], data)
     

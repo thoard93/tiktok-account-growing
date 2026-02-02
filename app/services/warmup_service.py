@@ -101,17 +101,14 @@ class WarmupService:
         
         logger.info(
             f"Running warmup day {account.warmup_day} for account {account_id}: "
-            f"{config['duration_min']}min, {config['max_likes']} likes, "
-            f"{config['max_follows']} follows, {config['max_comments']} comments"
+            f"{config['duration_min']}min browse video"
         )
         
-        # Execute warmup flow via GeeLark
+        # Execute warmup flow via GeeLark (browse video action)
         response = self.geelark.run_tiktok_warmup(
             phone_ids=[account.geelark_profile_id],
             duration_minutes=config["duration_min"],
-            max_likes=config["max_likes"],
-            max_follows=config["max_follows"],
-            max_comments=config["max_comments"]
+            action="browse video"
         )
         
         if response.success:
