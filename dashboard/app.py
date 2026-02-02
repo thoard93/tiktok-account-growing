@@ -846,6 +846,40 @@ elif page == "⚙️ GeeLark":
                         result = api_post("/geelark/phones/stop", ids)
                         if result:
                             st.success("Phones stopped")
+            
+            st.markdown("---")
+            
+            # Warmup Controls - Easy selection!
+            st.subheader("🔥 Run Warmup on Any Phone")
+            
+            # Create dropdown options from phone list
+            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
+            
+            col1, col2, col3 = st.columns([2, 1, 1])
+            with col1:
+                selected_phone = st.selectbox(
+                    "Select Phone", 
+                    options=list(phone_options.keys()),
+                    help="Pick a phone to run teamwork warmup"
+                )
+            with col2:
+                warmup_duration = st.number_input("Duration (min)", min_value=10, max_value=120, value=30)
+            with col3:
+                st.write("")  # Spacer
+                st.write("")
+                if st.button("🔥 Run Warmup", type="primary"):
+                    if selected_phone:
+                        phone_id = phone_options[selected_phone]
+                        result = api_post("/geelark/warmup/run", {
+                            "phone_id": phone_id,
+                            "duration_minutes": warmup_duration
+                        })
+                        if result and result.get("success"):
+                            st.success(f"Warmup started on {selected_phone}!")
+                        else:
+                            st.error(f"Failed: {result.get('message', 'Unknown error') if result else 'API error'}")
+        else:
+            st.info("No phones found in GeeLark. Create some phones first!")
     
     with tab2:
         st.subheader("Task History (Last 7 Days)")

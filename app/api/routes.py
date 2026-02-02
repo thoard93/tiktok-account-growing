@@ -828,3 +828,37 @@ async def get_task_detail(
     if response.success:
         return response.data
     raise HTTPException(status_code=500, detail=response.message)
+
+
+@router.post("/geelark/warmup/run", tags=["GeeLark"])
+async def run_warmup_on_phone(
+    data: dict,
+    geelark: GeeLarkClient = Depends(get_geelark_client)
+):
+    """
+    Run TikTok warmup on any GeeLark phone by ID.
+    
+    Args:
+        phone_id: The GeeLark phone ID
+        duration_minutes: Warmup duration (default 30)
+    """
+    phone_id = data.get("phone_id")
+    duration = data.get("duration_minutes", 30)
+    
+    if not phone_id:
+        raise HTTPException(status_code=400, detail="phone_id is required")
+    
+    # Run warmup using GeeLark's built-in AI warmup
+    response = geelark.run_tiktok_warmup(
+        phone_ids=[phone_id],
+        duration_minutes=duration,
+        max_likes=30,
+        max_follows=10,
+        max_comments=5
+    )
+    
+    return {
+        "success": response.success,
+        "message": response.message,
+        "data": response.data
+    }
