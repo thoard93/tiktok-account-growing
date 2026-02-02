@@ -943,15 +943,55 @@ class GeeLarkClient:
             variables: Task-specific variables
             schedule_at: Scheduled time (timestamp in seconds)
         """
+        # GeeLark API requires 'list' array format, not phoneIds
+        task_list = []
+        for phone_id in phone_ids:
+            item = {"phoneId": phone_id}
+            if variables:
+                item["variables"] = variables
+            task_list.append(item)
+        
         data = {
-            "phoneIds": phone_ids,
-            "taskType": task_type
+            "taskType": task_type,
+            "list": task_list
         }
-        if variables:
-            data["variables"] = variables
+        
         if schedule_at:
             data["scheduleAt"] = schedule_at
+        
+        logger.debug(f"Task add payload: {data}")
             
+        return self._make_request(self.ENDPOINTS["task_add"], data)
+    
+    def run_custom_rpa(
+        self,
+        phone_id: str,
+        flow_id: str,
+        variables: Optional[Dict[str, Any]] = None
+    ) -> GeeLarkResponse:
+        """
+        Run a custom RPA Canvas flow.
+        
+        Args:
+            phone_id: Cloud phone ID
+            flow_id: Canvas flow ID from GeeLark marketplace/custom flows
+            variables: Variables to pass to the flow
+        """
+        task_list = [{
+            "phoneId": phone_id,
+            "flowId": flow_id
+        }]
+        
+        if variables:
+            task_list[0]["variables"] = variables
+        
+        data = {
+            "taskType": self.TASK_TYPES.get("CUSTOM", 42),
+            "list": task_list
+        }
+        
+        logger.debug(f"Custom RPA payload: {data}")
+        
         return self._make_request(self.ENDPOINTS["task_add"], data)
     
     # ===========================
