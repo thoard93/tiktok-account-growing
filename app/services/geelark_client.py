@@ -931,24 +931,35 @@ class GeeLarkClient:
     def add_task(
         self,
         phone_ids: List[str],
-        task_type,  # Can be int (built-in) or str (Marketplace template name)
+        task_type: int,
         variables: Optional[Dict[str, Any]] = None,
-        schedule_at: Optional[int] = None
+        schedule_at: Optional[int] = None,
+        plan_name: Optional[str] = None
     ) -> GeeLarkResponse:
         """
         Create an automation task.
         
         Args:
-            phone_ids: List of cloud phone IDs
-            task_type: Task type - int for built-in, string for Marketplace template
-            variables: Task-specific variables
+            phone_ids: List of cloud phone IDs (envId in API docs)
+            task_type: Task type (1=video, 2=warmup, 3=carousel, etc.)
+            variables: Task-specific variables (merged into each list item)
             schedule_at: Scheduled time (timestamp in seconds)
+            plan_name: Optional task plan name
         """
-        # GeeLark API: variables go directly in list item, not nested under "variables"
+        import time
+        
+        # Default schedule to now if not provided
+        if schedule_at is None:
+            schedule_at = int(time.time())
+        
+        # Build task list - API uses "envId" not "phoneId"
         task_list = []
         for phone_id in phone_ids:
-            item = {"phoneId": phone_id}
-            # Add variables directly to item (not nested)
+            item = {
+                "envId": phone_id,  # API uses envId!
+                "scheduleAt": schedule_at
+            }
+            # Add variables directly to item
             if variables:
                 item.update(variables)
             task_list.append(item)
@@ -958,8 +969,8 @@ class GeeLarkClient:
             "list": task_list
         }
         
-        if schedule_at:
-            data["scheduleAt"] = schedule_at
+        if plan_name:
+            data["planName"] = plan_name
         
         logger.info(f"Task add payload: {data}")
             
@@ -1003,30 +1014,40 @@ class GeeLarkClient:
     def run_tiktok_warmup(
         self,
         phone_ids: List[str],
-        duration_minutes: int = 45,
-        max_likes: int = 30,
-        max_follows: int = 10,
-        max_comments: int = 5,
+        duration_minutes: int = 30,
+        action: str = "browse video",
+        keywords: Optional[List[str]] = None,
         schedule_at: Optional[int] = None
     ) -> GeeLarkResponse:
         """
-        Run TikTok AI account warmup task.
+        Run TikTok warmup task.
         
         Args:
-            phone_ids: List of phone IDs
-            duration_minutes: Session duration
-            max_likes: Maximum likes per session
-            max_follows: Maximum follows per session
-            max_comments: Maximum comments per session
-            schedule_at: Scheduled time (timestamp)
+            phone_ids: List of phone IDs (envId)
+            duration_minutes: Browsing duration in minutes
+            action: Warmup action - "browse video", "search video", or "search profile"
+            keywords: Search keywords (required for search actions, optional for browse)
+            schedule_at: Scheduled time (timestamp in seconds)
         """
-        # Try with NO variables - let GeeLark use its default warmup settings
-        # If this fails, we need to use a Custom Canvas flow instead
+        # Build warmup variables per API docs
+        variables = {
+            "action": action,
+            "duration": duration_minutes
+        }
+        
+        # Keywords are required for search, optional for browse
+        if keywords:
+            variables["keywords"] = keywords
+        elif action in ["search video", "search profile"]:
+            # Default keywords if searching without specifying
+            variables["keywords"] = ["tiktok", "fyp", "trending"]
+        
         return self.add_task(
             phone_ids=phone_ids,
             task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
-            variables=None,  # No custom vars - use GeeLark defaults
-            schedule_at=schedule_at
+            variables=variables,
+            schedule_at=schedule_at,
+            plan_name="API Warmup"
         )
     
     def run_tiktok_video_post(
