@@ -4,6 +4,7 @@ Account Manager Service
 Handles account lifecycle: creation, warmup, and status management.
 """
 
+import os
 import random
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
