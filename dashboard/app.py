@@ -878,6 +878,8 @@ elif page == "⚙️ GeeLark":
                             st.success(f"Warmup started on {selected_phone}!")
                         else:
                             st.error(f"Failed: {result.get('message', 'Unknown error') if result else 'API error'}")
+            
+            st.caption("💡 To stop a warmup, go to **Task History** tab and cancel the task, or use **Task Management** tab.")
         else:
             st.info("No phones found in GeeLark. Create some phones first!")
     

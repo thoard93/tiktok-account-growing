@@ -1018,17 +1018,13 @@ class GeeLarkClient:
             max_comments: Maximum comments per session
             schedule_at: Scheduled time (timestamp)
         """
-        variables = {
-            "duration": duration_minutes,
-            "maxLikes": max_likes,
-            "maxFollows": max_follows,
-            "maxComments": max_comments
-        }
-        
+        # Note: GeeLark's built-in AI warmup may not accept custom variables via API
+        # The warmup will use GeeLark's default/configured settings
+        # Try with no variables first, fall back to empty dict if needed
         return self.add_task(
             phone_ids=phone_ids,
             task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
-            variables=variables,
+            variables=None,  # Let GeeLark use its defaults
             schedule_at=schedule_at
         )
     

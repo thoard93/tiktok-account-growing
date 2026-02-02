@@ -350,14 +350,25 @@ async def delete_account(
     db: Session = Depends(get_db)
 ):
     """Delete an account from the database."""
-    from app.models.account import Account
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    
-    db.delete(account)
-    db.commit()
-    return {"message": f"Account {account_id} deleted successfully"}
+    try:
+        from app.models.account import Account, ActivityLog
+        
+        # First delete related activity logs
+        db.query(ActivityLog).filter(ActivityLog.account_id == account_id).delete()
+        
+        # Then delete the account
+        account = db.query(Account).filter(Account.id == account_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        db.delete(account)
+        db.commit()
+        return {"message": f"Account {account_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete: {str(e)}")
 
 
 @router.post("/accounts/full-setup", response_model=FullSetupResponse, tags=["Accounts"])
@@ -708,7 +719,7 @@ async def get_activity_logs(
 async def list_geelark_phones(
     geelark: GeeLarkClient = Depends(get_geelark_client),
     page: int = 1,
-    page_size: int = 20
+    page_size: int = 100  # Increased to get all phones at once (max 100)
 ):
     """List cloud phones directly from GeeLark."""
     response = geelark.list_phones(page=page, page_size=page_size)
