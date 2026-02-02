@@ -593,31 +593,83 @@ class AccountManager:
                         # Generate username and password
                         username, _, password = generate_credentials(name_prefix)
                         
-                        # For now, skip RPA registration (requires custom Canvas flow)
-                        # Instead, store credentials and start guest warmup
-                        # User can manually complete registration or we add Canvas flow later
-                        update_status(f"Number acquired: {sms_number.phone_number}")
+                        # Check if Canvas Flow is configured for registration
+                        register_flow_id = os.getenv("GEELARK_TIKTOK_REGISTER_FLOW_ID")
                         
-                        # Store the phone number and move to warmup
-                        # The device is ready with TikTok installed
-                        credentials = {
-                            "username": username,
-                            "email": None,
-                            "password": password,
-                            "phone": sms_number.phone_number,
-                            "activation_id": sms_number.activation_id,
-                            "guest_mode": True  # Start in guest mode, manual reg needed
-                        }
+                        if register_flow_id:
+                            # Use Canvas Flow for automated registration
+                            update_status(f"Running registration flow with {sms_number.phone_number}")
+                            
+                            # Run the custom Canvas RPA flow
+                            reg_response = self.geelark.run_custom_rpa(
+                                phone_id=phone_id,
+                                flow_id=register_flow_id,
+                                variables={
+                                    "PHONE_NUMBER": sms_number.phone_number,
+                                    "USERNAME": username,
+                                    "PASSWORD": password
+                                }
+                            )
+                            
+                            if not reg_response.success:
+                                logger.warning(f"Canvas RPA failed: {reg_response.message}")
+                                # Don't cancel activation yet - flow might still work
+                            else:
+                                logger.info(f"Canvas RPA started successfully")
+                            
+                            # Wait for SMS code
+                            update_status("Waiting for SMS verification code...")
+                            code = sms_client.wait_for_code(
+                                sms_number.activation_id,
+                                timeout=180,  # 3 minutes
+                                poll_interval=5
+                            )
+                            
+                            if code:
+                                logger.info(f"Received SMS code: {code}")
+                                update_status(f"Got code: {code}")
+                                
+                                # The Canvas flow should be waiting for code input
+                                # We store it for the flow to pick up or manual input
+                                sms_client.complete_activation(sms_number.activation_id)
+                                
+                                credentials = {
+                                    "username": username,
+                                    "email": None,
+                                    "password": password,
+                                    "phone": sms_number.phone_number,
+                                    "sms_code": code,
+                                    "guest_mode": False  # Full registration!
+                                }
+                                account_created = True
+                                break
+                            else:
+                                logger.warning("No SMS code received within timeout")
+                                sms_client.cancel_activation(sms_number.activation_id)
+                                continue
                         
-                        # Cancel the activation since we're not completing it automatically
-                        # (User can retry later or we add proper RPA flow)
-                        try:
-                            sms_client.cancel_activation(sms_number.activation_id)
-                        except:
-                            pass  # May fail if too early, that's ok
-                        
-                        account_created = True
-                        break
+                        else:
+                            # No Canvas Flow configured - store for manual registration
+                            update_status(f"Number acquired: {sms_number.phone_number} (manual reg)")
+                            logger.info("No GEELARK_TIKTOK_REGISTER_FLOW_ID - using guest mode")
+                            
+                            credentials = {
+                                "username": username,
+                                "email": None,
+                                "password": password,
+                                "phone": sms_number.phone_number,
+                                "activation_id": sms_number.activation_id,
+                                "guest_mode": True  # Manual reg needed
+                            }
+                            
+                            # Cancel activation since we're not completing it
+                            try:
+                                sms_client.cancel_activation(sms_number.activation_id)
+                            except:
+                                pass
+                            
+                            account_created = True
+                            break
                         
                     except Exception as e:
                         logger.error(f"Registration attempt {attempt + 1} failed: {e}")
