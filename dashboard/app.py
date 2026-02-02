@@ -926,11 +926,23 @@ elif page == "⚙️ GeeLark":
                 7: "🚫 Cancelled"
             }
             
+            # Common failure codes for quick reference
+            fail_codes = {
+                20116: "Not logged in",
+                20122: "TikTok start failed",
+                20129: "Device offline",
+                20124: "Homepage timeout",
+                20008: "Language not English",
+                20003: "Execution timeout",
+                29999: "Unknown error"
+            }
+            
             df = pd.DataFrame([{
                 "Task ID": t["id"],
                 "Type": task_types.get(t["taskType"], "Unknown"),
                 "Phone": t["serialName"],
                 "Status": statuses.get(t["status"], "Unknown"),
+                "Fail Reason": fail_codes.get(t.get("failCode"), t.get("failDesc", "-")) if t["status"] == 4 else "-",
                 "Cost (s)": t.get("cost", "-")
             } for t in history["items"]])
             
