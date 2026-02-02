@@ -884,7 +884,7 @@ elif page == "📊 Logs":
 elif page == "⚙️ GeeLark":
     st.title("GeeLark Direct Control")
     
-    tab1, tab2, tab3 = st.tabs(["📱 Cloud Phones", "📋 Task History", "🔧 Task Management"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📱 Cloud Phones", "📋 Task History", "🔧 Task Management", "📅 Scheduled Warmups"])
     
     with tab1:
         st.subheader("Cloud Phones")
@@ -1072,6 +1072,114 @@ elif page == "⚙️ GeeLark":
                     result = api_post("/geelark/tasks/retry", {"task_ids": ids})
                     if result:
                         st.success(f"Retried: {result.get('successAmount', 0)}")
+    
+    with tab4:
+        st.subheader("📅 Scheduled Daily Warmups")
+        st.caption("Set up automatic warmups that run every day at the specified time.")
+        
+        # Initialize schedules in session state if not exists
+        if "warmup_schedules" not in st.session_state:
+            st.session_state.warmup_schedules = []
+        
+        # Fetch phones for schedule creation
+        phones = api_get("/geelark/phones")
+        
+        if phones and phones.get("items"):
+            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
+            
+            st.markdown("### Create New Schedule")
+            
+            # Schedule creation form
+            with st.form("create_schedule"):
+                schedule_phones = st.multiselect(
+                    "Select Phones for Schedule",
+                    options=list(phone_options.keys()),
+                    help="These phones will run warmup daily"
+                )
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    schedule_time = st.time_input("Daily Run Time", value=None)
+                with col2:
+                    schedule_duration = st.number_input("Duration (min)", min_value=15, max_value=120, value=30)
+                with col3:
+                    schedule_mode = st.selectbox(
+                        "Warmup Mode",
+                        options=["🎯 Teamwork Trend", "📱 General FYP"]
+                    )
+                
+                submitted = st.form_submit_button("➕ Create Schedule", use_container_width=True)
+                
+                if submitted:
+                    if schedule_phones and schedule_time:
+                        new_schedule = {
+                            "id": len(st.session_state.warmup_schedules) + 1,
+                            "phones": schedule_phones,
+                            "phone_ids": [phone_options[p] for p in schedule_phones],
+                            "time": schedule_time.strftime("%H:%M"),
+                            "duration": schedule_duration,
+                            "mode": schedule_mode,
+                            "enabled": True
+                        }
+                        st.session_state.warmup_schedules.append(new_schedule)
+                        
+                        # Also save to API for persistence
+                        api_post("/warmup/schedules", new_schedule)
+                        
+                        st.success(f"✅ Schedule created! Daily at {schedule_time.strftime('%I:%M %p')}")
+                        st.rerun()
+                    else:
+                        st.warning("Please select phones and a time!")
+            
+            # Display existing schedules
+            if st.session_state.warmup_schedules:
+                st.markdown("### Active Schedules")
+                
+                for i, schedule in enumerate(st.session_state.warmup_schedules):
+                    with st.container():
+                        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                        
+                        with col1:
+                            status = "🟢" if schedule.get("enabled", True) else "🔴"
+                            st.write(f"{status} **{schedule['time']}** - {len(schedule['phones'])} phone(s)")
+                            st.caption(f"{schedule['mode']} | {schedule['duration']}min | {', '.join(schedule['phones'][:2])}{'...' if len(schedule['phones']) > 2 else ''}")
+                        
+                        with col2:
+                            if st.button("▶️", key=f"run_{i}", help="Run now"):
+                                # Trigger warmup immediately
+                                for phone_name in schedule['phones']:
+                                    phone_id = phone_options.get(phone_name)
+                                    if phone_id:
+                                        action = "search video" if "Teamwork" in schedule['mode'] else "browse video"
+                                        keywords = ["teamwork trend", "teamwork challenge"] if "Teamwork" in schedule['mode'] else None
+                                        api_post("/geelark/warmup/run", {
+                                            "phone_id": phone_id,
+                                            "duration_minutes": schedule['duration'],
+                                            "action": action,
+                                            "keywords": keywords
+                                        })
+                                st.success("Warmup triggered!")
+                                st.rerun()
+                        
+                        with col3:
+                            toggle_label = "⏸️" if schedule.get("enabled", True) else "▶️"
+                            if st.button(toggle_label, key=f"toggle_{i}", help="Enable/Disable"):
+                                st.session_state.warmup_schedules[i]["enabled"] = not schedule.get("enabled", True)
+                                st.rerun()
+                        
+                        with col4:
+                            if st.button("🗑️", key=f"delete_{i}", help="Delete"):
+                                st.session_state.warmup_schedules.pop(i)
+                                st.rerun()
+                        
+                        st.markdown("---")
+            else:
+                st.info("No schedules yet. Create one above!")
+            
+            st.markdown("---")
+            st.caption("💡 **Note:** Schedules run automatically on the server. You can close your browser and they'll still execute. Check Task History for results.")
+        else:
+            st.info("No phones found. Add phones in GeeLark first!")
 
 
 # Footer
