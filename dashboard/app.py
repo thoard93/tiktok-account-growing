@@ -166,6 +166,17 @@ def api_post(endpoint: str, data: dict = None):
         return None
 
 
+def api_delete(endpoint: str):
+    """Make DELETE request to API."""
+    try:
+        response = requests.delete(f"{API_BASE_URL}{endpoint}", timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"API Error: {e}")
+        return None
+
+
 def api_post_long(endpoint: str, data: dict = None):
     """Make POST request with extended timeout for long-running operations like Magic Setup."""
     full_url = f"{API_BASE_URL}{endpoint}"
@@ -455,7 +466,7 @@ elif page == "👤 Accounts":
             
             # Quick actions
             st.subheader("Quick Actions")
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             
             with col1:
                 account_id = st.number_input("Account ID", min_value=1, step=1)
@@ -474,6 +485,12 @@ elif page == "👤 Accounts":
                     result = api_post(f"/accounts/{account_id}/install-tiktok")
                     if result:
                         st.success("TikTok installation started!")
+            with col5:
+                if st.button("🗑️ Delete", type="primary"):
+                    result = api_delete(f"/accounts/{account_id}")
+                    if result:
+                        st.success(f"Account {account_id} deleted!")
+                        st.rerun()
         else:
             st.info("No accounts found. Create some accounts to get started!")
     

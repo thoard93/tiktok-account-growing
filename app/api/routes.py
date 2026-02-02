@@ -344,6 +344,22 @@ async def mark_account_banned(
     raise HTTPException(status_code=404, detail="Account not found")
 
 
+@router.delete("/accounts/{account_id}", tags=["Accounts"])
+async def delete_account(
+    account_id: int,
+    db: Session = Depends(get_db)
+):
+    """Delete an account from the database."""
+    from app.models.account import Account
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    db.delete(account)
+    db.commit()
+    return {"message": f"Account {account_id} deleted successfully"}
+
+
 @router.post("/accounts/full-setup", response_model=FullSetupResponse, tags=["Accounts"])
 async def full_automation_setup(
     data: FullSetupRequest,
