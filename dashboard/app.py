@@ -113,6 +113,16 @@ st.markdown("""
     .status-banned { color: #ff4757 !important; font-weight: bold; }
     .status-paused { color: #a0a0a0 !important; font-weight: bold; }
     
+    /* Dropdown/Selectbox text visibility */
+    .stSelectbox > div > div > div > div {
+        color: #ffffff !important;
+    }
+    
+    .stSelectbox [data-baseweb="select"] > div {
+        background-color: #252550 !important;
+        color: #ffffff !important;
+    }
+    
     /* Button styling */
     .stButton > button {
         background: linear-gradient(90deg, #6366f1, #8b5cf6) !important;

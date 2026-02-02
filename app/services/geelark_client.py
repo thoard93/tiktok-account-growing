@@ -943,12 +943,13 @@ class GeeLarkClient:
             variables: Task-specific variables
             schedule_at: Scheduled time (timestamp in seconds)
         """
-        # GeeLark API requires 'list' array format, not phoneIds
+        # GeeLark API: variables go directly in list item, not nested under "variables"
         task_list = []
         for phone_id in phone_ids:
             item = {"phoneId": phone_id}
+            # Add variables directly to item (not nested)
             if variables:
-                item["variables"] = variables
+                item.update(variables)
             task_list.append(item)
         
         data = {
@@ -959,7 +960,7 @@ class GeeLarkClient:
         if schedule_at:
             data["scheduleAt"] = schedule_at
         
-        logger.debug(f"Task add payload: {data}")
+        logger.info(f"Task add payload: {data}")
             
         return self._make_request(self.ENDPOINTS["task_add"], data)
     
@@ -1018,13 +1019,15 @@ class GeeLarkClient:
             max_comments: Maximum comments per session
             schedule_at: Scheduled time (timestamp)
         """
-        # Note: GeeLark's built-in AI warmup may not accept custom variables via API
-        # The warmup will use GeeLark's default/configured settings
-        # Try with no variables first, fall back to empty dict if needed
+        # GeeLark AI warmup variables - duration goes directly in list item
+        variables = {
+            "duration": duration_minutes
+        }
+        
         return self.add_task(
             phone_ids=phone_ids,
             task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
-            variables=None,  # Let GeeLark use its defaults
+            variables=variables,
             schedule_at=schedule_at
         )
     
