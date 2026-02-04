@@ -270,10 +270,12 @@ def api_get(endpoint: str):
         return None
 
 
-def api_post(endpoint: str, data: dict = None):
-    """Make POST request to API."""
+def api_post(endpoint: str, data: dict = None, long_timeout: bool = False):
+    """Make POST request to API. Use long_timeout=True for video generation."""
     try:
-        response = requests.post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=30)
+        # Video generation can take 5+ minutes
+        timeout = 600 if long_timeout else 30
+        response = requests.post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=timeout)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -747,7 +749,7 @@ elif page == "🎬 Videos":
                     "style": style_map.get(video_style),
                     "text_overlay": None if text_overlay == "Random" else text_overlay,
                     "skip_overlay": skip_overlay
-                })
+                }, long_timeout=True)
                 
                 if result:
                     if result.get("success"):
@@ -762,7 +764,7 @@ elif page == "🎬 Videos":
                     "count": video_count,
                     "styles": [style_map.get(video_style)] if video_style != "Random (Mixed)" else None,
                     "skip_overlay": skip_overlay
-                })
+                }, long_timeout=True)
                 
                 if result:
                     st.success(f"""
@@ -955,7 +957,7 @@ elif page == "🎬 Videos":
                         "count": daily_videos,
                         "styles": None,  # Random
                         "skip_overlay": False
-                    })
+                    }, long_timeout=True)
                     if result and result.get("success"):
                         st.success(f"✅ Generated {result.get('successful', 0)} videos! Cost: ${result.get('total_cost_usd', 0):.2f}")
                     else:
