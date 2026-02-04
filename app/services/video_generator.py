@@ -101,7 +101,14 @@ class VideoGenerator:
     def __init__(self, output_dir: Optional[str] = None):
         """Initialize video generator."""
         self.kie = get_kie_client()
-        self.claude_api_key = os.getenv("ANTHROPIC_API_KEY")
+        # Strip whitespace from API key to prevent hidden char issues
+        raw_key = os.getenv("ANTHROPIC_API_KEY", "")
+        self.claude_api_key = raw_key.strip() if raw_key else None
+        
+        if self.claude_api_key:
+            logger.info(f"ANTHROPIC_API_KEY loaded: {self.claude_api_key[:20]}... (len={len(self.claude_api_key)})")
+        else:
+            logger.warning("ANTHROPIC_API_KEY not set - will use template prompts")
         
         # Output directory for generated videos
         self.output_dir = Path(output_dir or os.getenv("VIDEO_OUTPUT_DIR", "./generated_videos"))
