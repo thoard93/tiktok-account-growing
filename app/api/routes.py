@@ -1277,11 +1277,11 @@ async def post_videos_to_tiktok(
             # Wait a moment for transfer
             time.sleep(2)
             
-            # Create posting task
-            video_path_on_phone = f"/sdcard/Download/{video_filename}"
+            # Create posting task - use the resourceUrl directly!
+            # The video API takes a URL, not a file path on phone
             post_response = geelark.post_tiktok_video(
                 phone_id=phone_id,
-                video_path=video_path_on_phone,
+                video_url=resource_url,  # Use the GeeLark OSS URL
                 caption=full_caption
             )
             
@@ -1290,7 +1290,7 @@ async def post_videos_to_tiktok(
                     "video": video_filename,
                     "phone_id": phone_id,
                     "success": True,
-                    "task_id": post_response.data.get("taskId") if post_response.data else None,
+                    "task_id": post_response.data.get("taskId") or (post_response.data.get("taskIds") or [None])[0] if post_response.data else None,
                     "message": "Posting task created"
                 })
             else:

@@ -1579,7 +1579,7 @@ class GeeLarkClient:
     def post_tiktok_video(
         self,
         phone_id: str,
-        video_path: str,
+        video_url: str,
         caption: str = "",
         schedule_at: Optional[int] = None
     ) -> GeeLarkResponse:
@@ -1588,8 +1588,8 @@ class GeeLarkClient:
         
         Args:
             phone_id: Cloud phone ID (envId)
-            video_path: Path to video on phone (e.g., /sdcard/Download/video.mp4)
-            caption: Video caption with hashtags
+            video_url: URL to video (from upload resourceUrl)
+            caption: Video description with hashtags
             schedule_at: Optional Unix timestamp to schedule (default: now)
             
         Returns:
@@ -1602,16 +1602,20 @@ class GeeLarkClient:
             schedule_at = int(time.time()) + 30
         
         # Task type 1 = TikTok video posting
+        # Per GeeLark docs: video (URL), videoDesc (description)
+        task_item = {
+            "envId": phone_id,
+            "scheduleAt": schedule_at,
+            "video": video_url  # URL, not path
+        }
+        
+        # Only add videoDesc if caption provided
+        if caption:
+            task_item["videoDesc"] = caption
+        
         response = self._make_request("/task/add", {
             "taskType": 1,
-            "list": [
-                {
-                    "envId": phone_id,
-                    "scheduleAt": schedule_at,
-                    "videoPath": video_path,
-                    "text": caption
-                }
-            ],
+            "list": [task_item],
             "planName": f"Video Post {int(time.time())}"
         })
         
