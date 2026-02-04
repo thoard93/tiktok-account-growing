@@ -982,11 +982,24 @@ elif page == "⚙️ GeeLark":
             with col1:
                 warmup_mode = st.selectbox(
                     "Warmup Mode",
-                    options=["🎯 Teamwork Trend (Recommended)", "📱 General FYP Browse"],
-                    help="Teamwork: Searches 'teamwork trend' keywords. General: Just browses FYP."
+                    options=["🚀 Enhanced Teamwork (+ Comments/Likes)", "🎯 Teamwork Trend (Search Only)", "📱 General FYP Browse"],
+                    help="Enhanced: Chains warmup + comments + likes. Teamwork: Searches keywords. General: Just browses."
                 )
             with col2:
                 warmup_duration = st.number_input("Duration (min)", min_value=10, max_value=120, value=30)
+            
+            # Show advanced options for enhanced mode
+            enhanced_mode = "Enhanced" in warmup_mode
+            if enhanced_mode:
+                st.caption("🔗 **Enhanced Mode** chains: Warmup → AI Comments → Random Likes")
+                adv_col1, adv_col2 = st.columns(2)
+                with adv_col1:
+                    enable_comments = st.checkbox("Enable AI Comments", value=True, help="15% chance to leave relevant teamwork comments")
+                with adv_col2:
+                    enable_likes = st.checkbox("Enable Random Likes", value=True, help="30% chance to like videos")
+            else:
+                enable_comments = False
+                enable_likes = False
             
             # Big mobile-friendly button
             if st.button("🔥 Run Warmup on Selected", type="primary", use_container_width=True):
@@ -995,7 +1008,7 @@ elif page == "⚙️ GeeLark":
                     failures = []
                     
                     # Determine warmup action based on mode
-                    if "Teamwork" in warmup_mode:
+                    if "Enhanced" in warmup_mode or "Teamwork" in warmup_mode:
                         action = "search video"
                         keywords = ["teamwork trend", "teamwork challenge", "teamwork goals", "teamwork makes the dream work"]
                     else:
@@ -1011,7 +1024,10 @@ elif page == "⚙️ GeeLark":
                             "phone_id": phone_id,
                             "duration_minutes": warmup_duration,
                             "action": action,
-                            "keywords": keywords
+                            "keywords": keywords,
+                            "enhanced": enhanced_mode,
+                            "enable_comments": enable_comments,
+                            "enable_likes": enable_likes
                         })
                         
                         if result and result.get("success"):

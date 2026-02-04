@@ -116,6 +116,15 @@ class GeeLarkClient:
         "CUSTOM": 42,
     }
     
+    # Marketplace Template Names (for chaining)
+    # These are passed as planName to use Marketplace templates
+    MARKETPLACE_TEMPLATES = {
+        "AI_WARMUP": "TikTok AI account warmup",
+        "AI_COMMENTS": "TikTok AI comment generator",
+        "RANDOM_LIKE": "TikTok random like",
+        "AUTO_FOLLOW": "TikTok auto follow",
+    }
+    
     # Task Status Constants
     TASK_STATUS = {
         1: "waiting",
@@ -1057,6 +1066,124 @@ class GeeLarkClient:
             schedule_at=schedule_at,
             plan_name="API Warmup"
         )
+    
+    def run_enhanced_warmup(
+        self,
+        phone_ids: List[str],
+        duration_minutes: int = 30,
+        keywords: Optional[List[str]] = None,
+        enable_comments: bool = True,
+        enable_likes: bool = True,
+        comment_prompt: str = "Short positive teamwork comment",
+        like_probability: int = 30,
+        schedule_at: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Run enhanced warmup with chained templates.
+        
+        Chains: AI Warmup -> AI Comments -> Random Like
+        
+        Args:
+            phone_ids: List of phone IDs
+            duration_minutes: Main warmup duration
+            keywords: Search keywords for trend focus
+            enable_comments: Chain AI comment generator
+            enable_likes: Chain random like template
+            comment_prompt: AI prompt for relevant comments
+            like_probability: Percentage chance to like (0-100)
+            schedule_at: Base schedule time (chains are staggered)
+        
+        Returns:
+            Dict with task IDs for each chained template
+        """
+        import time
+        import random
+        
+        if schedule_at is None:
+            schedule_at = int(time.time())
+        
+        results = {
+            "warmup_task": None,
+            "comment_task": None,
+            "like_task": None,
+            "success": True,
+            "errors": []
+        }
+        
+        # Default teamwork keywords
+        if not keywords:
+            keywords = [
+                "teamwork trend",
+                "teamwork challenge", 
+                "teamwork goals",
+                "teamwork makes the dream work"
+            ]
+        
+        # 1. Run main warmup with keywords
+        try:
+            warmup_response = self.run_tiktok_warmup(
+                phone_ids=phone_ids,
+                duration_minutes=duration_minutes,
+                action="search video",  # Use search for trend focus
+                keywords=keywords,
+                schedule_at=schedule_at
+            )
+            results["warmup_task"] = warmup_response.data
+            logger.info(f"Warmup started: {warmup_response.data}")
+        except Exception as e:
+            results["errors"].append(f"Warmup failed: {e}")
+            results["success"] = False
+        
+        # 2. Chain AI Comments (starts after warmup is ~80% done)
+        if enable_comments:
+            try:
+                # Schedule comments to start 80% through warmup
+                comment_start = schedule_at + int(duration_minutes * 60 * 0.8)
+                
+                comment_variables = {
+                    "action": "browse video",
+                    "duration": 10,  # 10 min of commenting
+                    "commentPrompt": comment_prompt,
+                    "commentChance": 15  # 15% chance per video
+                }
+                
+                comment_response = self.add_task(
+                    phone_ids=phone_ids,
+                    task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
+                    variables=comment_variables,
+                    schedule_at=comment_start,
+                    plan_name="Teamwork Comments"
+                )
+                results["comment_task"] = comment_response.data
+                logger.info(f"Comments chained: {comment_response.data}")
+            except Exception as e:
+                results["errors"].append(f"Comments failed: {e}")
+        
+        # 3. Chain Random Likes (runs during warmup)
+        if enable_likes:
+            try:
+                # Schedule likes to start 30% through warmup
+                like_start = schedule_at + int(duration_minutes * 60 * 0.3)
+                
+                like_variables = {
+                    "action": "browse video",
+                    "duration": 15,  # 15 min of liking
+                    "likeChance": like_probability
+                }
+                
+                like_response = self.add_task(
+                    phone_ids=phone_ids,
+                    task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
+                    variables=like_variables,
+                    schedule_at=like_start,
+                    plan_name="Teamwork Likes"
+                )
+                results["like_task"] = like_response.data
+                logger.info(f"Likes chained: {like_response.data}")
+            except Exception as e:
+                results["errors"].append(f"Likes failed: {e}")
+        
+        return results
     
     def run_tiktok_video_post(
         self,

@@ -863,16 +863,34 @@ async def run_warmup_on_phone(
     if not phone_id:
         raise HTTPException(status_code=400, detail="phone_id is required")
     
-    # Run warmup with specified mode
-    response = geelark.run_tiktok_warmup(
-        phone_ids=[phone_id],
-        duration_minutes=duration,
-        action=action,
-        keywords=keywords
-    )
+    enhanced = data.get("enhanced", False)
+    enable_comments = data.get("enable_comments", True)
+    enable_likes = data.get("enable_likes", True)
     
-    return {
-        "success": response.success,
-        "message": response.message,
-        "data": response.data
-    }
+    if enhanced:
+        # Use enhanced warmup with template chaining
+        result = geelark.run_enhanced_warmup(
+            phone_ids=[phone_id],
+            duration_minutes=duration,
+            keywords=keywords,
+            enable_comments=enable_comments,
+            enable_likes=enable_likes
+        )
+        return {
+            "success": result.get("success", True),
+            "message": "Enhanced warmup started with template chaining",
+            "data": result
+        }
+    else:
+        # Run standard warmup
+        response = geelark.run_tiktok_warmup(
+            phone_ids=[phone_id],
+            duration_minutes=duration,
+            action=action,
+            keywords=keywords
+        )
+        return {
+            "success": response.success,
+            "message": response.message,
+            "data": response.data
+        }
