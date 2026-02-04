@@ -7,7 +7,7 @@ FastAPI endpoints for account management, automation, and GeeLark integration.
 import os
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from loguru import logger
 
@@ -1127,6 +1127,48 @@ async def delete_video(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.post("/videos/upload")
+async def upload_video_manual(
+    file: UploadFile = File(...),
+    caption: str = Form(""),
+    hashtags: str = Form("")
+):
+    """
+    Upload a video file manually.
+    Saves to the generated_videos folder so it can be posted like AI-generated videos.
+    """
+    from app.services.video_generator import get_video_generator
+    import shutil
+    
+    generator = get_video_generator()
+    
+    # Ensure output directory exists
+    generator.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate unique filename to avoid conflicts
+    timestamp = int(time.time())
+    safe_filename = f"manual_{timestamp}_{file.filename}"
+    video_path = generator.output_dir / safe_filename
+    
+    try:
+        # Save the uploaded file
+        with open(video_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        logger.info(f"Manual video uploaded: {safe_filename}")
+        
+        return {
+            "success": True,
+            "filename": safe_filename,
+            "path": str(video_path),
+            "caption": caption,
+            "hashtags": hashtags,
+            "message": "Video uploaded to generated videos folder"
+        }
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/videos/post/batch")
 async def post_videos_to_tiktok(

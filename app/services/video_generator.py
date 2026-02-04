@@ -313,6 +313,72 @@ Just output the prompt, nothing else."""
             logger.error(f"Metadata strip failed: {e}")
             return False
     
+    def add_sound_to_video(
+        self,
+        input_video_path: str,
+        output_video_path: str,
+        sound_path: Optional[str] = None
+    ) -> bool:
+        """
+        Add background sound/music to video using FFmpeg.
+        
+        Args:
+            input_video_path: Source video (with text overlay)
+            output_video_path: Output with audio
+            sound_path: Path to audio file (defaults to teamwork_trend.mp3)
+        
+        Returns:
+            True if successful
+        """
+        try:
+            # Default to teamwork trend sound
+            if sound_path is None:
+                # Look in assets/sounds folder
+                base_path = Path(__file__).parent.parent.parent
+                sound_path = base_path / "assets" / "sounds" / "teamwork_trend.mp3"
+            
+            sound_path = Path(sound_path)
+            
+            if not sound_path.exists():
+                logger.warning(f"Sound file not found: {sound_path}, skipping audio")
+                # If no sound file, just copy the video
+                import shutil
+                shutil.copy(input_video_path, output_video_path)
+                return True
+            
+            # FFmpeg command to mux audio with video
+            # -shortest: Crop audio to video length (handles 29s MP3 with 10s video)
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", input_video_path,      # Video input
+                "-i", str(sound_path),       # Audio input (teamwork sound)
+                "-c:v", "copy",              # No re-encode video (fast)
+                "-c:a", "aac",               # TikTok-friendly audio codec
+                "-shortest",                 # Crop audio to video length
+                "-map", "0:v:0",             # Video from first input
+                "-map", "1:a:0",             # Audio from second input
+                output_video_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0:
+                logger.info(f"Sound added: {sound_path.name}")
+                return True
+            else:
+                logger.error(f"FFmpeg audio mux error: {result.stderr[:200]}")
+                # Fall back to video without sound
+                import shutil
+                shutil.copy(input_video_path, output_video_path)
+                return False
+                
+        except FileNotFoundError:
+            logger.error("FFmpeg not found - sound not added")
+            return False
+        except Exception as e:
+            logger.error(f"Sound addition failed: {e}")
+            return False
+    
     # ===========================
     # Full Pipeline
     # ===========================
@@ -457,21 +523,38 @@ Just output the prompt, nothing else."""
                 overlay_video_path = raw_video_path
                 logger.warning("Using video without text overlay")
         
-        # 6. Strip metadata to remove AI fingerprints
-        logger.info("Step 6: Stripping metadata...")
-        strip_success = self.strip_metadata(
+        # 6. Add teamwork sound
+        logger.info("Step 6: Adding teamwork sound...")
+        sound_video_path = self.output_dir / f"sound_{video_filename}"
+        sound_success = self.add_sound_to_video(
             str(overlay_video_path),
+            str(sound_video_path)
+        )
+        
+        if sound_success and sound_video_path.exists():
+            # Delete overlay intermediate
+            if overlay_video_path != raw_video_path:
+                overlay_video_path.unlink(missing_ok=True)
+        else:
+            # Fallback: use video without sound
+            sound_video_path = overlay_video_path
+            logger.warning("Using video without teamwork sound")
+        
+        # 7. Strip metadata to remove AI fingerprints
+        logger.info("Step 7: Stripping metadata...")
+        strip_success = self.strip_metadata(
+            str(sound_video_path),
             str(final_video_path)
         )
         
         if strip_success:
             # Delete intermediate file
-            if overlay_video_path != raw_video_path:
-                overlay_video_path.unlink(missing_ok=True)
+            if sound_video_path != overlay_video_path and sound_video_path != raw_video_path:
+                sound_video_path.unlink(missing_ok=True)
         else:
             # Fallback: use video with metadata
-            if overlay_video_path.exists():
-                overlay_video_path.rename(final_video_path)
+            if sound_video_path.exists():
+                sound_video_path.rename(final_video_path)
             logger.warning("Using video with metadata (strip failed)")
         
         return GeneratedVideo(
