@@ -1106,6 +1106,7 @@ class GeeLarkClient:
             "warmup_task": None,
             "comment_task": None,
             "like_task": None,
+            "comment_like_task": None,
             "success": True,
             "errors": []
         }
@@ -1159,16 +1160,16 @@ class GeeLarkClient:
             except Exception as e:
                 results["errors"].append(f"Comments failed: {e}")
         
-        # 3. Chain Random Likes (runs during warmup)
+        # 3. Chain Random Likes on Videos (runs during warmup)
         if enable_likes:
             try:
-                # Schedule likes to start 30% through warmup
+                # Schedule video likes to start 30% through warmup
                 like_start = schedule_at + int(duration_minutes * 60 * 0.3)
                 
                 like_variables = {
                     "action": "browse video",
-                    "duration": 15,  # 15 min of liking
-                    "likeChance": like_probability
+                    "duration": 15,  # 15 min of liking videos
+                    "likeChance": like_probability  # 30% of videos
                 }
                 
                 like_response = self.add_task(
@@ -1176,12 +1177,39 @@ class GeeLarkClient:
                     task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
                     variables=like_variables,
                     schedule_at=like_start,
-                    plan_name="Teamwork Likes"
+                    plan_name="Teamwork Video Likes"
                 )
                 results["like_task"] = like_response.data
-                logger.info(f"Likes chained: {like_response.data}")
+                logger.info(f"Video likes chained: {like_response.data}")
             except Exception as e:
-                results["errors"].append(f"Likes failed: {e}")
+                results["errors"].append(f"Video likes failed: {e}")
+            
+            # 4. Chain Comment Section Likes (separate phase for follower growth)
+            try:
+                # Schedule comment likes to start 50% through warmup  
+                comment_like_start = schedule_at + int(duration_minutes * 60 * 0.5)
+                
+                # Comment likes strategy: open comments frequently, like 3-8 per video
+                comment_like_variables = {
+                    "action": "browse video",
+                    "duration": 20,  # 20 min focused on comment section
+                    "openCommentsChance": 50,  # Open comments 50% of videos
+                    "likeCommentsChance": 60,  # Like comments 60% when opened
+                    "likeCommentsMin": 3,  # Min likes per opened comment section
+                    "likeCommentsMax": 8   # Max likes per opened comment section
+                }
+                
+                comment_like_response = self.add_task(
+                    phone_ids=phone_ids,
+                    task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
+                    variables=comment_like_variables,
+                    schedule_at=comment_like_start,
+                    plan_name="Teamwork Comment Likes"
+                )
+                results["comment_like_task"] = comment_like_response.data
+                logger.info(f"Comment likes chained: {comment_like_response.data}")
+            except Exception as e:
+                results["errors"].append(f"Comment likes failed: {e}")
         
         return results
     
