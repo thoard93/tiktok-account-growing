@@ -141,8 +141,10 @@ class VideoGenerator:
             system_prompt = """You are a creative prompt engineer for AI image generation. Generate short, vivid image prompts for POV walking/exploring videos in beautiful outdoor locations. 
 
 Requirements:
-- POV (first person) perspective
-- Outdoor scene: nature, beach, city park, forest, etc.
+- POV (first person) perspective looking OUT at scenery (NOT looking down at feet/legs)
+- NO feet, legs, or shoes visible - focus on the landscape/horizon
+- Upper body or hands only if person shown
+- Outdoor scene: nature, beach, city park, forest, mountain view, etc.
 - Motivational/positive vibe
 - 9:16 vertical format optimized
 - Short but descriptive (1-2 sentences)
@@ -205,7 +207,7 @@ Just output the prompt, nothing else."""
         input_video_path: str,
         output_video_path: str,
         text: str,
-        font_size: int = 72,
+        font_size: int = 36,
         font_color: str = "white",
         border_color: str = "black",
         border_width: int = 3
