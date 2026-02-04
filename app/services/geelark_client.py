@@ -1538,17 +1538,17 @@ class GeeLarkClient:
         Upload a file from URL to a cloud phone's storage.
         
         Args:
-            phone_id: Cloud phone ID (envId)
-            resource_url: URL of the file to upload (from get_upload_url)
-            destination_path: Destination folder on phone
+            phone_id: Cloud phone ID
+            resource_url: URL of the file to upload (from get_upload_url resourceUrl)
+            destination_path: Ignored - files go to Downloads folder
             
         Returns:
             Response with taskId for tracking upload progress
         """
+        # Per GeeLark docs: parameter names are "id" and "fileUrl"
         response = self._make_request("/phone/uploadFile", {
-            "envId": phone_id,
-            "url": resource_url,
-            "filePath": destination_path
+            "id": phone_id,
+            "fileUrl": resource_url
         })
         
         if response.success:
