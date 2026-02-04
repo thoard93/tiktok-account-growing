@@ -1515,14 +1515,27 @@ class GeeLarkClient:
         # Extract file extension to determine file type
         ext = filename.split(".")[-1].lower() if "." in filename else "mp4"
         
-        # GeeLark upload API - try with 'suffix' parameter (file extension)
-        # Based on API error messages, trying different parameter names
+        # Map extension to FileType as STRING
+        # Error shows field name is 'GetUploadUrlReq.FileType' (capital F and T)
+        file_type_map = {
+            "mp4": "1",
+            "mov": "1", 
+            "avi": "1",
+            "png": "2",
+            "jpg": "2",
+            "jpeg": "2",
+            "apk": "3",
+            "xapk": "4"
+        }
+        file_type = file_type_map.get(ext, "1")  # Default to video
+        
+        # Use exact casing from error: FileType (capital F and T) with string value
         response = self._make_request("/upload/getUrl", {
-            "suffix": ext  # e.g., "mp4", "mov", etc.
+            "FileType": file_type  # String: "1" for video
         })
         
         if response.success:
-            logger.info(f"Got upload URL for {filename} (suffix: {ext})")
+            logger.info(f"Got upload URL for {filename} (FileType: {file_type})")
         else:
             logger.error(f"Failed to get upload URL: {response.message}")
         
