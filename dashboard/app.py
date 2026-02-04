@@ -779,18 +779,30 @@ elif page == "🎬 Videos":
             
             for vid in gen_videos["videos"]:
                 with st.container():
-                    col1, col2, col3 = st.columns([3, 1, 1])
+                    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                     with col1:
                         st.write(f"**{vid['filename']}**")
                         st.caption(f"Size: {vid['size_mb']} MB | Created: {vid['created_at'][:16]}")
                     with col2:
-                        st.write(f"📁 {vid['size_mb']} MB")
+                        # Download link
+                        download_url = f"{API_BASE_URL}/videos/download/{vid['filename']}"
+                        st.markdown(f"[📥 Download]({download_url})")
                     with col3:
+                        # Preview toggle
+                        if st.button("👁️ Preview", key=f"preview_{vid['filename']}"):
+                            st.session_state[f"show_preview_{vid['filename']}"] = not st.session_state.get(f"show_preview_{vid['filename']}", False)
+                    with col4:
                         if st.button("🗑️", key=f"del_{vid['filename']}"):
                             result = api_delete(f"/videos/{vid['filename']}")
                             if result and result.get("success"):
                                 st.success("Deleted!")
                                 st.rerun()
+                    
+                    # Show video preview if toggled
+                    if st.session_state.get(f"show_preview_{vid['filename']}", False):
+                        video_url = f"{API_BASE_URL}/videos/download/{vid['filename']}"
+                        st.video(video_url)
+                
                 st.markdown("---")
         else:
             st.info("No videos generated yet. Use the 'AI Generate' tab to create teamwork videos!")
@@ -810,7 +822,26 @@ elif page == "🎬 Videos":
     # ===== POST TO TIKTOK TAB =====
     with tab3:
         st.subheader("📤 Post Videos to TikTok")
-        st.caption("Select videos and phones to schedule posts")
+        st.caption("Select videos and phones to post to TikTok via GeeLark")
+        
+        # Get available videos
+        gen_videos = api_get("/videos/list")
+        available_videos = []
+        if gen_videos and gen_videos.get("videos"):
+            available_videos = [v["filename"] for v in gen_videos["videos"]]
+        
+        if not available_videos:
+            st.warning("No videos available. Generate videos in the 'AI Generate' tab first!")
+        else:
+            # Video selection
+            selected_videos = st.multiselect(
+                "Select Videos to Post",
+                options=available_videos,
+                default=available_videos[:1],  # Default to first video
+                help="Choose which videos to post"
+            )
+            
+            st.caption(f"📽️ {len(selected_videos)} video(s) selected")
         
         # Get phones
         phones = api_get("/geelark/phones")
@@ -840,16 +871,48 @@ elif page == "🎬 Videos":
                     "Hashtags",
                     value=caption_result.get("hashtags", "#teamwork #teamworktrend #fyp")
                 )
+            else:
+                custom_caption = st.text_area("Caption", value="")
+                hashtags = st.text_input("Hashtags", value="#teamwork #fyp #viral")
             
-            # Post frequency
-            col1, col2 = st.columns(2)
-            with col1:
-                posts_per_day = st.selectbox("Posts per Day", [1, 2, 3], index=0)
-            with col2:
-                st.info(f"📅 Will post {posts_per_day}x daily per phone")
+            st.markdown("---")
             
-            if st.button("📤 Start Posting", type="primary", use_container_width=True, disabled=not selected_phones):
-                st.warning("⚠️ Video posting via GeeLark coming soon! For now, upload videos manually in GeeLark.")
+            # Status info
+            can_post = selected_phones and available_videos and selected_videos
+            
+            if st.button("📤 Start Posting", type="primary", use_container_width=True, disabled=not can_post):
+                phone_ids = [phone_options[p] for p in selected_phones]
+                
+                with st.spinner("Uploading videos and creating posting tasks..."):
+                    result = api_post("/videos/post/batch", {
+                        "videos": selected_videos,
+                        "phone_ids": phone_ids,
+                        "caption": custom_caption,
+                        "hashtags": hashtags
+                    })
+                    
+                    if result:
+                        if result.get("successful", 0) > 0:
+                            st.success(f"✅ Created {result['successful']} posting task(s)!")
+                            
+                            with st.expander("View Details"):
+                                for r in result.get("results", []):
+                                    if r.get("success"):
+                                        st.write(f"✅ {r.get('video')} → {r.get('phone_id', '')[:8]}... (Task: {r.get('task_id', 'N/A')})")
+                                    else:
+                                        st.write(f"❌ {r.get('video')}: {r.get('error')}")
+                        else:
+                            st.error(f"❌ All tasks failed")
+                            for r in result.get("results", []):
+                                st.error(f"Error: {r.get('error')}")
+                    else:
+                        st.error("Failed to create posting tasks")
+            
+            if not can_post:
+                if not selected_videos:
+                    st.info("👆 Select videos to post")
+                elif not selected_phones:
+                    st.info("👆 Select phones to post from")
         else:
             st.warning("No phones available. Set up phones in the GeeLark page first.")
     

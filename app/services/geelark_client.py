@@ -1492,3 +1492,186 @@ class GeeLarkClient:
             data=None,
             trace_id=""
         )
+    
+    # ===========================
+    # File Upload Methods
+    # ===========================
+    
+    def get_upload_url(
+        self,
+        filename: str,
+        content_type: str = "video/mp4"
+    ) -> GeeLarkResponse:
+        """
+        Get a temporary upload URL from GeeLark's OSS.
+        
+        Args:
+            filename: Name of the file to upload
+            content_type: MIME type (video/mp4, image/png, etc.)
+            
+        Returns:
+            Response with uploadUrl and resourceUrl
+        """
+        # Determine file type from extension
+        ext = filename.split(".")[-1].lower() if "." in filename else "mp4"
+        file_type_map = {
+            "mp4": "video",
+            "mov": "video", 
+            "avi": "video",
+            "png": "image",
+            "jpg": "image",
+            "jpeg": "image",
+            "apk": "apk",
+            "xapk": "xapk"
+        }
+        file_type = file_type_map.get(ext, "video")
+        
+        response = self._make_request("/upload/getUrl", {
+            "fileName": filename,
+            "fileType": file_type
+        })
+        
+        if response.success:
+            logger.info(f"Got upload URL for {filename}")
+        else:
+            logger.error(f"Failed to get upload URL: {response.message}")
+        
+        return response
+    
+    def upload_file_to_phone(
+        self,
+        phone_id: str,
+        resource_url: str,
+        destination_path: str = "/sdcard/Download/"
+    ) -> GeeLarkResponse:
+        """
+        Upload a file from URL to a cloud phone's storage.
+        
+        Args:
+            phone_id: Cloud phone ID (envId)
+            resource_url: URL of the file to upload (from get_upload_url)
+            destination_path: Destination folder on phone
+            
+        Returns:
+            Response with taskId for tracking upload progress
+        """
+        response = self._make_request("/phone/uploadFile", {
+            "envId": phone_id,
+            "url": resource_url,
+            "filePath": destination_path
+        })
+        
+        if response.success:
+            logger.info(f"Started file upload to phone {phone_id}")
+        else:
+            logger.error(f"Failed to start file upload: {response.message}")
+        
+        return response
+    
+    def check_file_upload_status(self, task_id: str) -> GeeLarkResponse:
+        """
+        Check the status of a file upload task.
+        
+        Args:
+            task_id: Task ID from upload_file_to_phone
+            
+        Returns:
+            Response with status: 0=Non-retrievable, 1=Uploading, 2=Success, 3=Failed
+        """
+        return self._make_request("/phone/uploadFile/result", {
+            "taskId": task_id
+        })
+    
+    # ===========================
+    # TikTok Video Posting
+    # ===========================
+    
+    def post_tiktok_video(
+        self,
+        phone_id: str,
+        video_path: str,
+        caption: str = "",
+        schedule_at: Optional[int] = None
+    ) -> GeeLarkResponse:
+        """
+        Create a TikTok video posting task.
+        
+        Args:
+            phone_id: Cloud phone ID (envId)
+            video_path: Path to video on phone (e.g., /sdcard/Download/video.mp4)
+            caption: Video caption with hashtags
+            schedule_at: Optional Unix timestamp to schedule (default: now)
+            
+        Returns:
+            Response with taskId for tracking
+        """
+        import time
+        
+        # Default to 30 seconds from now if not specified
+        if schedule_at is None:
+            schedule_at = int(time.time()) + 30
+        
+        # Task type 1 = TikTok video posting
+        response = self._make_request("/task/add", {
+            "taskType": 1,
+            "list": [
+                {
+                    "envId": phone_id,
+                    "scheduleAt": schedule_at,
+                    "videoPath": video_path,
+                    "text": caption
+                }
+            ],
+            "planName": f"Video Post {int(time.time())}"
+        })
+        
+        if response.success:
+            logger.info(f"Created video posting task for phone {phone_id}")
+        else:
+            logger.error(f"Failed to create posting task: {response.message}")
+        
+        return response
+    
+    def batch_post_tiktok_videos(
+        self,
+        posts: List[Dict[str, Any]],
+        plan_name: str = "Batch Video Posts"
+    ) -> GeeLarkResponse:
+        """
+        Create multiple TikTok video posting tasks.
+        
+        Args:
+            posts: List of dicts with keys:
+                - phone_id: Cloud phone ID
+                - video_path: Path to video on phone
+                - caption: Video caption
+                - schedule_at: Optional Unix timestamp
+            plan_name: Name for the batch plan
+            
+        Returns:
+            Response with task IDs
+        """
+        import time
+        
+        task_list = []
+        for i, post in enumerate(posts):
+            schedule_at = post.get("schedule_at", int(time.time()) + 30 + (i * 60))
+            task_list.append({
+                "envId": post["phone_id"],
+                "scheduleAt": schedule_at,
+                "videoPath": post["video_path"],
+                "text": post.get("caption", "")
+            })
+        
+        response = self._make_request("/task/add", {
+            "taskType": 1,
+            "list": task_list,
+            "planName": plan_name
+        })
+        
+        if response.success:
+            logger.info(f"Created {len(task_list)} video posting tasks")
+        else:
+            logger.error(f"Failed to create batch posting tasks: {response.message}")
+        
+        return response

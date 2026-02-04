@@ -1091,6 +1091,25 @@ async def get_random_caption():
     }
 
 
+@router.get("/videos/download/{filename}")
+async def download_video(filename: str):
+    """Stream a video file for download or preview."""
+    from fastapi.responses import FileResponse
+    from app.services.video_generator import get_video_generator
+    
+    generator = get_video_generator()
+    video_path = generator.output_dir / filename
+    
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    return FileResponse(
+        path=video_path,
+        media_type="video/mp4",
+        filename=filename
+    )
+
+
 @router.delete("/videos/{filename}")
 async def delete_video(filename: str):
     """Delete a generated video."""
@@ -1107,3 +1126,146 @@ async def delete_video(filename: str):
         return {"success": True, "message": f"Deleted {filename}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/videos/post/batch")
+async def post_videos_to_tiktok(
+    data: dict,
+    db: Session = Depends(get_db),
+    geelark: GeeLarkClient = Depends(get_geelark_client)
+):
+    """
+    Upload videos to phones and create TikTok posting tasks.
+    
+    Args:
+        videos: List of video filenames to post
+        phone_ids: List of phone IDs to post from
+        caption: Caption to use (or random if empty)
+        hashtags: Hashtags string
+    """
+    import time
+    import requests as req
+    from pathlib import Path
+    from app.services.video_generator import get_video_generator
+    
+    video_filenames = data.get("videos", [])
+    phone_ids = data.get("phone_ids", [])
+    caption = data.get("caption", "")
+    hashtags = data.get("hashtags", "#teamwork #fyp #viral")
+    
+    if not video_filenames or not phone_ids:
+        raise HTTPException(status_code=400, detail="Videos and phone_ids required")
+    
+    generator = get_video_generator()
+    results = []
+    
+    # Build full caption
+    full_caption = f"{caption} {hashtags}".strip() if caption else hashtags
+    
+    for video_filename in video_filenames:
+        video_path = generator.output_dir / video_filename
+        
+        if not video_path.exists():
+            results.append({
+                "video": video_filename,
+                "success": False,
+                "error": "Video file not found"
+            })
+            continue
+        
+        # Step 1: Get upload URL from GeeLark
+        upload_response = geelark.get_upload_url(video_filename)
+        
+        if not upload_response.success:
+            results.append({
+                "video": video_filename,
+                "success": False,
+                "error": f"Failed to get upload URL: {upload_response.message}"
+            })
+            continue
+        
+        upload_url = upload_response.data.get("uploadUrl") or upload_response.data.get("url")
+        resource_url = upload_response.data.get("resourceUrl") or upload_response.data.get("accessUrl")
+        
+        if not upload_url:
+            results.append({
+                "video": video_filename,
+                "success": False,
+                "error": "No upload URL returned"
+            })
+            continue
+        
+        # Step 2: Upload file to GeeLark OSS
+        try:
+            with open(video_path, "rb") as f:
+                upload_res = req.put(upload_url, data=f, timeout=120)
+                if upload_res.status_code not in [200, 201]:
+                    results.append({
+                        "video": video_filename,
+                        "success": False,
+                        "error": f"OSS upload failed: {upload_res.status_code}"
+                    })
+                    continue
+        except Exception as e:
+            results.append({
+                "video": video_filename,
+                "success": False,
+                "error": f"Upload error: {str(e)}"
+            })
+            continue
+        
+        # Step 3: For each phone, transfer file and create posting task
+        for phone_id in phone_ids:
+            # Transfer to phone
+            transfer_response = geelark.upload_file_to_phone(
+                phone_id=phone_id,
+                resource_url=resource_url,
+                destination_path="/sdcard/Download/"
+            )
+            
+            if not transfer_response.success:
+                results.append({
+                    "video": video_filename,
+                    "phone_id": phone_id,
+                    "success": False,
+                    "error": f"File transfer failed: {transfer_response.message}"
+                })
+                continue
+            
+            # Wait a moment for transfer
+            time.sleep(2)
+            
+            # Create posting task
+            video_path_on_phone = f"/sdcard/Download/{video_filename}"
+            post_response = geelark.post_tiktok_video(
+                phone_id=phone_id,
+                video_path=video_path_on_phone,
+                caption=full_caption
+            )
+            
+            if post_response.success:
+                results.append({
+                    "video": video_filename,
+                    "phone_id": phone_id,
+                    "success": True,
+                    "task_id": post_response.data.get("taskId") if post_response.data else None,
+                    "message": "Posting task created"
+                })
+            else:
+                results.append({
+                    "video": video_filename,
+                    "phone_id": phone_id,
+                    "success": False,
+                    "error": f"Posting task failed: {post_response.message}"
+                })
+    
+    successful = sum(1 for r in results if r.get("success"))
+    failed = len(results) - successful
+    
+    return {
+        "success": successful > 0,
+        "total": len(results),
+        "successful": successful,
+        "failed": failed,
+        "results": results
+    }

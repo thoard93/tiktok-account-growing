@@ -196,6 +196,7 @@ class PostingService:
         account = self.db.query(Account).filter(Account.id == account_id).first()
         
         if not video or not account or not account.geelark_profile_id:
+            logger.error(f"Invalid video/account or missing geelark_profile_id")
             return False
         
         # Ensure video is uploaded to phone
@@ -210,12 +211,14 @@ class PostingService:
         elif video.hashtags:
             final_caption += " " + " ".join([f"#{tag}" for tag in video.hashtags.split(",")])
         
-        # Execute posting flow
-        response = self.geelark.run_tiktok_video_post(
-            phone_ids=[account.geelark_profile_id],
-            video_paths=[f"/sdcard/DCIM/TikTok/{video.filename}"],
-            captions=[final_caption],
-            hashtags=hashtags
+        # The video was uploaded to /sdcard/Download/
+        video_path_on_phone = f"/sdcard/Download/{os.path.basename(video.filepath)}"
+        
+        # Execute posting flow using correct method
+        response = self.geelark.post_tiktok_video(
+            phone_id=account.geelark_profile_id,
+            video_path=video_path_on_phone,
+            caption=final_caption
         )
         
         if response.success:
