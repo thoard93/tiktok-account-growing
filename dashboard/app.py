@@ -700,7 +700,7 @@ elif page == "🔄 Warmup":
 elif page == "🎬 Videos":
     st.title("🎬 Video Management")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🤖 AI Generate", "📋 Video Library", "📤 Post to TikTok", "📁 Upload Manual", "📅 Scheduled Posts"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🤖 AI Generate", "📋 Video Library", "📤 Post to TikTok", "📁 Upload Manual", "📅 Scheduled Posts", "📊 Task Logs"])
     
     # ===== AI GENERATE TAB =====
     with tab1:
@@ -1019,6 +1019,72 @@ elif page == "🎬 Videos":
             st.success(f"✅ {gen_videos.get('count', 0)} videos ready in library")
         else:
             st.warning("No videos generated yet")
+    
+    # ===== TASK LOGS TAB =====
+    with tab6:
+        st.subheader("📊 Video Posting Task Logs")
+        st.caption("Monitor the status of video posting tasks (taskType=1)")
+        
+        # Refresh button
+        if st.button("🔄 Refresh Task Status", key="refresh_video_tasks"):
+            st.rerun()
+        
+        # Fetch tasks with taskType=1 (video posting)
+        tasks_result = api_post("/geelark/tasks/query", {
+            "taskType": 1,  # Video posting tasks only
+            "page": 1,
+            "pageSize": 50
+        })
+        
+        if tasks_result and tasks_result.get("items"):
+            tasks = tasks_result["items"]
+            
+            # Status mapping
+            status_map = {
+                1: "⏳ Pending",
+                2: "🔄 Running",
+                3: "✅ Success",
+                4: "❌ Failed",
+                5: "⏸️ Cancelled"
+            }
+            
+            # Create dataframe
+            df_data = []
+            for t in tasks:
+                status = status_map.get(t.get("status"), f"Unknown ({t.get('status')})")
+                created = t.get("createTime", "")
+                if created:
+                    try:
+                        created = datetime.fromisoformat(created.replace("Z", "+00:00")).strftime("%m/%d %H:%M")
+                    except:
+                        pass
+                
+                df_data.append({
+                    "Task ID": t.get("id", "")[:12] + "...",
+                    "Phone": t.get("serialName", "Unknown"),
+                    "Status": status,
+                    "Description": (t.get("videoDesc", "") or "")[:50] + "..." if t.get("videoDesc") else "-",
+                    "Created": created,
+                    "Error": t.get("failReason", "-")
+                })
+            
+            df = pd.DataFrame(df_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Summary stats
+            success_count = sum(1 for t in tasks if t.get("status") == 3)
+            failed_count = sum(1 for t in tasks if t.get("status") == 4)
+            pending_count = sum(1 for t in tasks if t.get("status") in [1, 2])
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("✅ Success", success_count)
+            with col2:
+                st.metric("❌ Failed", failed_count)
+            with col3:
+                st.metric("⏳ Pending/Running", pending_count)
+        else:
+            st.info("No video posting tasks found. Post some videos to see task status here!")
 
 
 # ===========================

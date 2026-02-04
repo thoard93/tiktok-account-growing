@@ -181,7 +181,9 @@ class PostingService:
         video_id: int,
         account_id: int,
         caption: Optional[str] = None,
-        hashtags: Optional[List[str]] = None
+        hashtags: Optional[List[str]] = None,
+        auto_start: bool = True,
+        auto_stop: bool = True
     ) -> bool:
         """
         Post a video to TikTok.
@@ -191,7 +193,11 @@ class PostingService:
             account_id: Account to post from
             caption: Override caption
             hashtags: Override hashtags
+            auto_start: Auto-start phone before posting (default True)
+            auto_stop: Auto-stop phone after posting (default True)
         """
+        import time
+        
         video = self.db.query(Video).filter(Video.id == video_id).first()
         account = self.db.query(Account).filter(Account.id == account_id).first()
         
@@ -199,52 +205,89 @@ class PostingService:
             logger.error(f"Invalid video/account or missing geelark_profile_id")
             return False
         
-        # Ensure video is uploaded to phone
-        if not video.is_uploaded_to_phone:
-            if not self.upload_video_to_phone(video_id, account_id):
-                return False
+        phone_id = account.geelark_profile_id
+        phone_started = False
         
-        # Prepare caption with hashtags
-        final_caption = caption or video.caption or ""
-        if hashtags:
-            final_caption += " " + " ".join([f"#{tag}" for tag in hashtags])
-        elif video.hashtags:
-            final_caption += " " + " ".join([f"#{tag}" for tag in video.hashtags.split(",")])
-        
-        # The video was uploaded to /sdcard/Download/
-        video_path_on_phone = f"/sdcard/Download/{os.path.basename(video.filepath)}"
-        
-        # Execute posting flow using correct method
-        response = self.geelark.post_tiktok_video(
-            phone_id=account.geelark_profile_id,
-            video_path=video_path_on_phone,
-            caption=final_caption
-        )
-        
-        if response.success:
-            video.is_posted = True
-            video.posted_at = datetime.utcnow()
-            account.posts_count += 1
-            account.last_activity = datetime.utcnow()
-            account.status = AccountStatus.POSTING
-            self.db.commit()
+        try:
+            # Auto-start phone if needed
+            if auto_start:
+                logger.info(f"Auto-starting phone {phone_id} for posting...")
+                start_response = self.geelark.start_phones([phone_id])
+                if start_response.success:
+                    phone_started = True
+                    # Wait for phone to boot (poll every 10s for up to 2 min)
+                    max_wait = 120
+                    wait_interval = 10
+                    waited = 0
+                    phone_running = False
+                    
+                    while waited < max_wait and not phone_running:
+                        time.sleep(wait_interval)
+                        waited += wait_interval
+                        status_response = self.geelark.get_phone_status([phone_id])
+                        if status_response.success and status_response.data:
+                            statuses = status_response.data
+                            if isinstance(statuses, list) and len(statuses) > 0:
+                                phone_running = statuses[0].get("status") == 0 or statuses[0].get("openStatus") == 0
+                        logger.info(f"Waiting for phone boot: {waited}s, running={phone_running}")
+                    
+                    if not phone_running:
+                        logger.warning("Phone not confirmed running, proceeding anyway...")
+                else:
+                    logger.warning(f"Failed to start phone: {start_response.message}")
             
-            self._log_activity(account_id, "video_posted", {
-                "video_id": video_id,
-                "caption": final_caption[:100],
-                "task_id": response.data.get("taskId") if response.data else None
-            })
+            # Ensure video is uploaded to GeeLark OSS
+            if not video.geelark_resource_url:
+                if not self.upload_video_to_phone(video_id, account_id):
+                    return False
+                # Refresh video object
+                self.db.refresh(video)
             
-            logger.info(f"Posted video {video_id} from account {account_id}")
-            return True
-        else:
-            self._log_activity(
-                account_id, "video_posted",
-                {"video_id": video_id, "error": response.message},
-                success=False,
-                error=response.message
+            # Prepare caption with hashtags
+            final_caption = caption or video.caption or ""
+            if hashtags:
+                final_caption += " " + " ".join([f"#{tag}" for tag in hashtags])
+            elif video.hashtags:
+                final_caption += " " + " ".join([f"#{tag}" for tag in video.hashtags.split(",")])
+            
+            # Execute posting using resourceUrl directly
+            response = self.geelark.post_tiktok_video(
+                phone_id=phone_id,
+                video_url=video.geelark_resource_url,  # Use OSS URL directly
+                caption=final_caption
             )
-            return False
+            
+            if response.success:
+                video.is_posted = True
+                video.posted_at = datetime.utcnow()
+                account.posts_count += 1
+                account.last_activity = datetime.utcnow()
+                account.status = AccountStatus.POSTING
+                self.db.commit()
+                
+                self._log_activity(account_id, "video_posted", {
+                    "video_id": video_id,
+                    "caption": final_caption[:100],
+                    "task_id": response.data.get("taskId") or (response.data.get("taskIds") or [None])[0] if response.data else None
+                })
+                
+                logger.info(f"Posted video {video_id} from account {account_id}")
+                return True
+            else:
+                self._log_activity(
+                    account_id, "video_posted",
+                    {"video_id": video_id, "error": response.message},
+                    success=False,
+                    error=response.message
+                )
+                return False
+                
+        finally:
+            # Auto-stop phone if we started it
+            if auto_stop and phone_started:
+                logger.info(f"Auto-stopping phone {phone_id} after posting...")
+                time.sleep(5)  # Let task register
+                self.geelark.stop_phones([phone_id])
     
     def schedule_post(
         self,

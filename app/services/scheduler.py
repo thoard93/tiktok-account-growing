@@ -143,6 +143,8 @@ class AutomationScheduler:
         
         try:
             from app.services.video_generator import get_video_generator
+            import requests
+            import os
             
             generator = get_video_generator()
             
@@ -163,10 +165,44 @@ class AutomationScheduler:
                 f"{len(failed)} failed, total cost: ${total_cost:.2f}"
             )
             
-            # TODO: Auto-post to configured phones via GeeLark
-            # This will be implemented when GeeLark video posting is ready
+            # Auto-post to phones if we have videos and a configured API
             if successful:
-                logger.info(f"Videos ready for posting: {[r.video_path for r in successful]}")
+                video_filenames = [os.path.basename(r.video_path) for r in successful if r.video_path]
+                logger.info(f"Videos ready for posting: {video_filenames}")
+                
+                # Get phone IDs from running/available phones
+                phones_response = self.geelark.list_phones(page=1, page_size=10)
+                if phones_response.success and phones_response.data:
+                    items = phones_response.data.get("items", [])
+                    phone_ids = [p["id"] for p in items if p.get("openStatus") in [0, 2]][:1]  # First one
+                    
+                    if phone_ids and video_filenames:
+                        logger.info(f"Auto-posting {len(video_filenames)} videos to {len(phone_ids)} phones with auto start/stop...")
+                        
+                        # Use internal API call to post/batch endpoint (handles all the flow)
+                        api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+                        try:
+                            resp = requests.post(
+                                f"{api_base}/api/videos/post/batch",
+                                json={
+                                    "videos": video_filenames,
+                                    "phone_ids": phone_ids,
+                                    "caption": "",
+                                    "hashtags": "#teamwork #teamworktrend #fyp #viral",
+                                    "auto_start": True,
+                                    "auto_stop": True
+                                },
+                                timeout=300  # 5 min timeout for phone boot + upload
+                            )
+                            if resp.status_code == 200:
+                                result = resp.json()
+                                logger.info(f"Auto-posting result: {result.get('successful', 0)}/{result.get('total', 0)} success")
+                            else:
+                                logger.error(f"Auto-posting failed: {resp.status_code} - {resp.text}")
+                        except Exception as e:
+                            logger.error(f"Auto-posting request failed: {e}")
+                    else:
+                        logger.warning("No phones available for auto-posting")
             
         except Exception as e:
             logger.error(f"Daily video generation failed: {e}")

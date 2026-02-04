@@ -1178,12 +1178,15 @@ async def post_videos_to_tiktok(
 ):
     """
     Upload videos to phones and create TikTok posting tasks.
+    Auto-starts phones before posting and stops them after.
     
     Args:
         videos: List of video filenames to post
         phone_ids: List of phone IDs to post from
         caption: Caption to use (or random if empty)
         hashtags: Hashtags string
+        auto_start: Whether to auto-start phones (default True)
+        auto_stop: Whether to auto-stop phones after posting (default True)
     """
     import time
     import requests as req
@@ -1194,12 +1197,56 @@ async def post_videos_to_tiktok(
     phone_ids = data.get("phone_ids", [])
     caption = data.get("caption", "")
     hashtags = data.get("hashtags", "#teamwork #fyp #viral")
+    auto_start = data.get("auto_start", True)
+    auto_stop = data.get("auto_stop", True)
     
     if not video_filenames or not phone_ids:
         raise HTTPException(status_code=400, detail="Videos and phone_ids required")
     
     generator = get_video_generator()
     results = []
+    phones_started = []
+    
+    # Step 0: Auto-start phones if needed
+    if auto_start:
+        logger.info(f"Auto-starting {len(phone_ids)} phone(s)...")
+        start_response = geelark.start_phones(phone_ids)
+        if start_response.success:
+            phones_started = phone_ids.copy()
+            logger.info(f"Phone start command sent, waiting for boot...")
+            
+            # Wait for phones to be running (status 0)
+            # Poll every 10 seconds for up to 2 minutes
+            max_wait = 120  # 2 minutes
+            wait_interval = 10
+            waited = 0
+            all_running = False
+            
+            while waited < max_wait and not all_running:
+                time.sleep(wait_interval)
+                waited += wait_interval
+                
+                status_response = geelark.get_phone_status(phone_ids)
+                if status_response.success and status_response.data:
+                    statuses = status_response.data
+                    # Check if list response
+                    if isinstance(statuses, list):
+                        all_running = all(
+                            s.get("status") == 0 or s.get("openStatus") == 0 
+                            for s in statuses
+                        )
+                    elif isinstance(statuses, dict):
+                        # Could be successDetails format
+                        details = statuses.get("successDetails", [])
+                        if details:
+                            all_running = all(d.get("status") == 0 for d in details)
+                
+                logger.info(f"Waited {waited}s for phones to boot, all_running={all_running}")
+            
+            if not all_running:
+                logger.warning("Not all phones confirmed running, proceeding anyway...")
+        else:
+            logger.warning(f"Failed to start phones: {start_response.message}")
     
     # Build full caption
     full_caption = f"{caption} {hashtags}".strip() if caption else hashtags
@@ -1304,10 +1351,23 @@ async def post_videos_to_tiktok(
     successful = sum(1 for r in results if r.get("success"))
     failed = len(results) - successful
     
+    # Step 4: Auto-stop phones if we started them
+    if auto_stop and phones_started:
+        logger.info(f"Auto-stopping {len(phones_started)} phone(s) after posting...")
+        # Short delay to let tasks register
+        time.sleep(5)
+        stop_response = geelark.stop_phones(phones_started)
+        if stop_response.success:
+            logger.info("Phones stopped successfully")
+        else:
+            logger.warning(f"Failed to stop phones: {stop_response.message}")
+    
     return {
         "success": successful > 0,
         "total": len(results),
         "successful": successful,
         "failed": failed,
+        "phones_started": len(phones_started) if auto_start else 0,
+        "phones_stopped": len(phones_started) if auto_stop and phones_started else 0,
         "results": results
     }
