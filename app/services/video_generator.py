@@ -6,7 +6,8 @@ Full pipeline:
 2. Nano Banana Pro creates 9:16 image
 3. Grok Imagine converts to 10s video
 4. FFmpeg adds centered text overlay
-5. Video ready for GeeLark upload/posting
+5. FFmpeg strips metadata (removes AI fingerprints)
+6. Video ready for GeeLark upload/posting
 """
 
 import os
@@ -246,6 +247,55 @@ Just output the prompt, nothing else."""
             logger.error(f"Text overlay failed: {e}")
             return False
     
+    def strip_metadata(self, input_video_path: str, output_video_path: str) -> bool:
+        """
+        Strip all metadata from video to remove AI generation fingerprints.
+        
+        This helps videos appear more "original" and can help bypass
+        platform detection of AI-generated content.
+        
+        Args:
+            input_video_path: Source video
+            output_video_path: Output without metadata
+        
+        Returns:
+            True if successful
+        """
+        try:
+            # FFmpeg command to strip all metadata
+            # -map_metadata -1: Remove all global metadata
+            # -fflags +bitexact: Disable encoding metadata
+            # -flags:v +bitexact: Disable video stream metadata
+            # -flags:a +bitexact: Disable audio stream metadata
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", input_video_path,
+                "-map_metadata", "-1",  # Remove all metadata
+                "-fflags", "+bitexact",  # No encoder info
+                "-flags:v", "+bitexact",  # No video encoder info
+                "-flags:a", "+bitexact",  # No audio encoder info
+                "-c:v", "libx264",  # Re-encode video
+                "-c:a", "aac",  # Re-encode audio
+                "-movflags", "+faststart",  # Optimize for streaming
+                output_video_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            
+            if result.returncode == 0:
+                logger.info("Metadata stripped successfully")
+                return True
+            else:
+                logger.error(f"Metadata strip error: {result.stderr}")
+                return False
+                
+        except FileNotFoundError:
+            logger.error("FFmpeg not found - metadata strip skipped")
+            return False
+        except Exception as e:
+            logger.error(f"Metadata strip failed: {e}")
+            return False
+    
     # ===========================
     # Full Pipeline
     # ===========================
@@ -371,14 +421,15 @@ Just output the prompt, nothing else."""
         
         # 5. Add text overlay
         final_text = text_overlay or random.choice(TEXT_OVERLAYS)
+        overlay_video_path = self.output_dir / f"overlay_{video_filename}"
         
         if skip_overlay:
-            # Just rename raw to final
-            raw_video_path.rename(final_video_path)
+            # Just copy raw to overlay path (will be processed for metadata)
+            overlay_video_path = raw_video_path
         else:
             overlay_success = self.add_text_overlay(
                 str(raw_video_path),
-                str(final_video_path),
+                str(overlay_video_path),
                 final_text
             )
             
@@ -386,8 +437,25 @@ Just output the prompt, nothing else."""
                 raw_video_path.unlink(missing_ok=True)  # Delete raw
             else:
                 # Fallback: use raw video without overlay
-                raw_video_path.rename(final_video_path)
+                overlay_video_path = raw_video_path
                 logger.warning("Using video without text overlay")
+        
+        # 6. Strip metadata to remove AI fingerprints
+        logger.info("Step 6: Stripping metadata...")
+        strip_success = self.strip_metadata(
+            str(overlay_video_path),
+            str(final_video_path)
+        )
+        
+        if strip_success:
+            # Delete intermediate file
+            if overlay_video_path != raw_video_path:
+                overlay_video_path.unlink(missing_ok=True)
+        else:
+            # Fallback: use video with metadata
+            if overlay_video_path.exists():
+                overlay_video_path.rename(final_video_path)
+            logger.warning("Using video with metadata (strip failed)")
         
         return GeneratedVideo(
             success=True,
@@ -395,7 +463,7 @@ Just output the prompt, nothing else."""
             image_url=image_url,
             video_url=video_url,
             prompt_used=image_prompt,
-            text_overlay=final_text,
+            text_overlay=final_text if not skip_overlay else None,
             cost_usd=cost
         )
     
