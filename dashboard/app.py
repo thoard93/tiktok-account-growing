@@ -827,6 +827,8 @@ elif page == "🎬 Videos":
         # Get available videos
         gen_videos = api_get("/videos/list")
         available_videos = []
+        selected_videos = []  # Initialize to prevent NameError
+        
         if gen_videos and gen_videos.get("videos"):
             available_videos = [v["filename"] for v in gen_videos["videos"]]
         
