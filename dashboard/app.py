@@ -740,49 +740,27 @@ elif page == "🎬 Videos":
                 "Mountain": "mountain"
             }
             
-            progress = st.progress(0, text="Starting video generation...")
-            status_text = st.empty()
-            
+            # Start job (returns immediately with job_id)
             if video_count == 1:
-                # Single video
                 result = api_post("/videos/generate", {
                     "style": style_map.get(video_style),
                     "text_overlay": None if text_overlay == "Random" else text_overlay,
                     "skip_overlay": skip_overlay
-                }, long_timeout=True)
-                
-                if result:
-                    if result.get("success"):
-                        st.success(f"✅ Video generated! Cost: ${result.get('cost_usd', 0):.2f}")
-                        st.write(f"**Path:** {result.get('video_path')}")
-                        st.write(f"**Overlay:** {result.get('text_overlay')}")
-                    else:
-                        st.error(f"❌ Failed: {result.get('error')}")
+                })
             else:
-                # Batch generation
                 result = api_post("/videos/batch", {
                     "count": video_count,
                     "styles": [style_map.get(video_style)] if video_style != "Random (Mixed)" else None,
                     "skip_overlay": skip_overlay
-                }, long_timeout=True)
-                
-                if result:
-                    st.success(f"""
-                    ✅ Batch complete!
-                    - **Generated:** {result.get('successful', 0)}/{result.get('total', 0)}
-                    - **Failed:** {result.get('failed', 0)}
-                    - **Total Cost:** ${result.get('total_cost_usd', 0):.2f}
-                    """)
-                    
-                    # Show individual results
-                    with st.expander("View Details"):
-                        for i, vid in enumerate(result.get("videos", [])):
-                            if vid.get("success"):
-                                st.write(f"✅ Video {i+1}: {vid.get('video_path')}")
-                            else:
-                                st.write(f"❌ Video {i+1}: {vid.get('error')}")
+                })
             
-            progress.progress(100, text="Complete!")
+            if result and result.get("job_id"):
+                job_id = result["job_id"]
+                st.info(f"🚀 Video generation started! Job ID: **{job_id}**")
+                st.markdown("⏳ Generating videos takes 2-5 minutes per video. Check the **Video Library** tab for results.")
+                st.markdown(f"You can also poll status at: `/api/videos/job/{job_id}`")
+            elif result:
+                st.warning(f"Unexpected response: {result}")
     
     # ===== VIDEO LIBRARY TAB =====
     with tab2:
@@ -952,16 +930,16 @@ elif page == "🎬 Videos":
         
         with col1:
             if st.button("🎥 Generate Videos Now", use_container_width=True):
-                with st.spinner("Generating videos... This may take a few minutes."):
-                    result = api_post("/videos/batch", {
-                        "count": daily_videos,
-                        "styles": None,  # Random
-                        "skip_overlay": False
-                    }, long_timeout=True)
-                    if result and result.get("success"):
-                        st.success(f"✅ Generated {result.get('successful', 0)} videos! Cost: ${result.get('total_cost_usd', 0):.2f}")
-                    else:
-                        st.error("Failed to generate videos")
+                result = api_post("/videos/batch", {
+                    "count": daily_videos,
+                    "styles": None,  # Random
+                    "skip_overlay": False
+                })
+                if result and result.get("job_id"):
+                    st.success(f"🚀 Generation started! Job ID: **{result['job_id']}**")
+                    st.info("Check the **Video Library** tab in 2-5 minutes for results.")
+                else:
+                    st.error("Failed to start video generation")
         
         with col2:
             if st.button("📤 Post Now (Coming Soon)", use_container_width=True, disabled=True):

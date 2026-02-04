@@ -900,78 +900,42 @@ async def run_warmup_on_phone(
 # Video Generation Routes
 # ===========================
 
-@router.post("/videos/generate")
-async def generate_teamwork_video(
-    data: dict,
-    background_tasks: BackgroundTasks
-):
-    """
-    Generate a single teamwork trend video.
-    
-    Pipeline: Claude prompt → Nano Banana Pro image → Grok video → FFmpeg overlay
-    
-    Cost: ~$0.24 per video
-    """
-    from app.services.video_generator import get_video_generator
-    
-    style = data.get("style", None)  # beach, forest, city, nature, etc.
-    text_overlay = data.get("text_overlay", None)
-    skip_overlay = data.get("skip_overlay", False)
-    
-    try:
-        generator = get_video_generator()
-        result = generator.generate_teamwork_video(
-            style_hint=style,
-            text_overlay=text_overlay,
-            skip_overlay=skip_overlay
-        )
-        
-        return {
-            "success": result.success,
-            "video_path": result.video_path,
-            "image_url": result.image_url,
-            "video_url": result.video_url,
-            "prompt_used": result.prompt_used,
-            "text_overlay": result.text_overlay,
-            "cost_usd": result.cost_usd,
-            "error": result.error
-        }
-    except Exception as e:
-        logger.error(f"Video generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Simple in-memory job tracker for video generation
+import threading
+import uuid
+_video_jobs = {}
+_video_jobs_lock = threading.Lock()
 
 
-@router.post("/videos/batch")
-async def generate_video_batch(data: dict):
-    """
-    Generate multiple teamwork trend videos.
-    
-    Args:
-        count: Number of videos (1-20)
-        styles: Optional list of style hints
-        skip_overlay: Skip FFmpeg text overlay
-    """
+def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay: str, skip_overlay: bool):
+    """Background worker for video generation."""
     from app.services.video_generator import get_video_generator
     
-    count = min(data.get("count", 5), 20)  # Cap at 20
-    styles = data.get("styles", None)
-    skip_overlay = data.get("skip_overlay", False)
-    
     try:
-        generator = get_video_generator()
-        results = generator.generate_batch(
-            count=count,
-            style_hints=styles,
-            skip_overlay=skip_overlay
-        )
+        with _video_jobs_lock:
+            _video_jobs[job_id]["status"] = "running"
+            _video_jobs[job_id]["message"] = "Generating videos..."
         
-        return {
-            "success": True,
-            "total": len(results),
-            "successful": sum(1 for r in results if r.success),
-            "failed": sum(1 for r in results if not r.success),
-            "total_cost_usd": sum(r.cost_usd for r in results),
-            "videos": [
+        generator = get_video_generator()
+        
+        if count == 1:
+            result = generator.generate_teamwork_video(
+                style_hint=style,
+                text_overlay=text_overlay,
+                skip_overlay=skip_overlay
+            )
+            results = [result]
+        else:
+            results = generator.generate_batch(
+                count=count,
+                style_hints=[style] if style else None,
+                skip_overlay=skip_overlay
+            )
+        
+        with _video_jobs_lock:
+            _video_jobs[job_id]["status"] = "completed"
+            _video_jobs[job_id]["message"] = "Video generation complete!"
+            _video_jobs[job_id]["results"] = [
                 {
                     "success": r.success,
                     "video_path": r.video_path,
@@ -981,10 +945,109 @@ async def generate_video_batch(data: dict):
                 }
                 for r in results
             ]
-        }
+            _video_jobs[job_id]["total_cost_usd"] = sum(r.cost_usd for r in results)
+            _video_jobs[job_id]["successful"] = sum(1 for r in results if r.success)
+            _video_jobs[job_id]["failed"] = sum(1 for r in results if not r.success)
+            
     except Exception as e:
-        logger.error(f"Batch video generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Video generation job {job_id} failed: {e}")
+        with _video_jobs_lock:
+            _video_jobs[job_id]["status"] = "failed"
+            _video_jobs[job_id]["message"] = str(e)
+
+
+@router.post("/videos/generate")
+async def generate_teamwork_video(
+    data: dict,
+    background_tasks: BackgroundTasks
+):
+    """
+    Start video generation job (returns immediately).
+    
+    Pipeline: Claude prompt → Nano Banana Pro image → Grok video → FFmpeg overlay
+    
+    Returns a job_id to poll with /videos/job/{job_id}
+    """
+    style = data.get("style", None)
+    text_overlay = data.get("text_overlay", None)
+    skip_overlay = data.get("skip_overlay", False)
+    
+    job_id = str(uuid.uuid4())[:8]
+    
+    with _video_jobs_lock:
+        _video_jobs[job_id] = {
+            "status": "queued",
+            "message": "Starting video generation...",
+            "created_at": datetime.utcnow().isoformat(),
+            "count": 1,
+            "results": [],
+            "total_cost_usd": 0,
+            "successful": 0,
+            "failed": 0
+        }
+    
+    # Run in background thread (not blocking)
+    thread = threading.Thread(
+        target=_run_video_generation_job,
+        args=(job_id, 1, style, text_overlay, skip_overlay),
+        daemon=True
+    )
+    thread.start()
+    
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Video generation started. Poll /videos/job/{job_id} for status."
+    }
+
+
+@router.post("/videos/batch")
+async def generate_video_batch(data: dict):
+    """
+    Start batch video generation job (returns immediately).
+    
+    Returns a job_id to poll with /videos/job/{job_id}
+    """
+    count = min(data.get("count", 5), 20)
+    styles = data.get("styles", None)
+    skip_overlay = data.get("skip_overlay", False)
+    
+    style = styles[0] if styles and len(styles) > 0 else None
+    job_id = str(uuid.uuid4())[:8]
+    
+    with _video_jobs_lock:
+        _video_jobs[job_id] = {
+            "status": "queued",
+            "message": f"Starting batch generation of {count} videos...",
+            "created_at": datetime.utcnow().isoformat(),
+            "count": count,
+            "results": [],
+            "total_cost_usd": 0,
+            "successful": 0,
+            "failed": 0
+        }
+    
+    thread = threading.Thread(
+        target=_run_video_generation_job,
+        args=(job_id, count, style, None, skip_overlay),
+        daemon=True
+    )
+    thread.start()
+    
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": f"Batch generation of {count} videos started. Poll /videos/job/{job_id} for status."
+    }
+
+
+@router.get("/videos/job/{job_id}")
+async def get_video_job_status(job_id: str):
+    """Get status of a video generation job."""
+    with _video_jobs_lock:
+        if job_id not in _video_jobs:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return _video_jobs[job_id]
 
 
 @router.get("/videos/list")
