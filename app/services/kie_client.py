@@ -214,8 +214,8 @@ class KieClient:
             KieTaskResult with current state and result URLs if complete
         """
         try:
-            # queryTask uses GET with taskId as query parameter
-            response = self._make_get_request_sync("/jobs/queryTask", {"taskId": task_id})
+            # Use recordInfo endpoint (not queryTask) per kie.ai docs
+            response = self._make_get_request_sync("/jobs/recordInfo", {"taskId": task_id})
             
             if response.get("code") == 200:
                 data = response.get("data", {})

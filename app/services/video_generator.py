@@ -146,6 +146,10 @@ Just output the prompt, nothing else."""
             if style_hint:
                 user_message += f" Theme: {style_hint}"
             
+            # Debug: log key presence (not the actual key)
+            key_preview = self.claude_api_key[:15] + "..." if self.claude_api_key else "None"
+            logger.debug(f"Using Claude API key: {key_preview}")
+            
             response = httpx.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -154,7 +158,7 @@ Just output the prompt, nothing else."""
                     "anthropic-version": "2023-06-01"
                 },
                 json={
-                    "model": "claude-sonnet-4-20250514",
+                    "model": "claude-sonnet-4-20250514",  # Match working Discord bot
                     "max_tokens": 200,
                     "system": system_prompt,
                     "messages": [{"role": "user", "content": user_message}]
@@ -172,6 +176,10 @@ Just output the prompt, nothing else."""
             logger.info(f"Claude generated prompt: {prompt[:100]}...")
             return prompt
             
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Claude API HTTP error {e.response.status_code}: {e.response.text[:200]}, using template")
+            template = random.choice(IMAGE_PROMPT_TEMPLATES)
+            return f"{template}, motivational aesthetic, 9:16 vertical format, cinematic quality"
         except Exception as e:
             logger.warning(f"Claude prompt generation failed: {e}, using template")
             template = random.choice(IMAGE_PROMPT_TEMPLATES)
