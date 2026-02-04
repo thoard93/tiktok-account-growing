@@ -134,6 +134,43 @@ class AutomationScheduler:
         finally:
             db.close()
     
+    def run_daily_video_generation(self):
+        """
+        Generate AI teamwork trend videos and post to scheduled phones.
+        Full pipeline: Claude prompt → Nano Banana Pro → Grok Imagine → FFmpeg → GeeLark post.
+        """
+        logger.info("Starting daily video generation job...")
+        
+        try:
+            from app.services.video_generator import get_video_generator
+            
+            generator = get_video_generator()
+            
+            # Generate 3 videos with different styles
+            results = generator.generate_batch(
+                count=3,
+                style_hints=["nature", "beach", "city"],
+                skip_overlay=False
+            )
+            
+            successful = [r for r in results if r.success]
+            failed = [r for r in results if not r.success]
+            
+            total_cost = sum(r.cost_usd for r in results)
+            
+            logger.info(
+                f"Daily video generation complete: {len(successful)} success, "
+                f"{len(failed)} failed, total cost: ${total_cost:.2f}"
+            )
+            
+            # TODO: Auto-post to configured phones via GeeLark
+            # This will be implemented when GeeLark video posting is ready
+            if successful:
+                logger.info(f"Videos ready for posting: {[r.video_path for r in successful]}")
+            
+        except Exception as e:
+            logger.error(f"Daily video generation failed: {e}")
+    
     # ===========================
     # Task Monitoring Jobs
     # ===========================
@@ -292,6 +329,15 @@ class AutomationScheduler:
             self.check_warmup_progress,
             IntervalTrigger(hours=1),
             id="warmup_progress",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Daily video generation - runs at 8 AM UTC to generate teamwork videos
+        self.scheduler.add_job(
+            self.run_daily_video_generation,
+            CronTrigger(hour=8, minute=0),  # 8 AM UTC
+            id="daily_video_generation",
             replace_existing=True,
             max_instances=1
         )

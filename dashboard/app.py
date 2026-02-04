@@ -698,7 +698,7 @@ elif page == "🔄 Warmup":
 elif page == "🎬 Videos":
     st.title("🎬 Video Management")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["🤖 AI Generate", "📋 Video Library", "📤 Post to TikTok", "📁 Upload Manual"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🤖 AI Generate", "📋 Video Library", "📤 Post to TikTok", "📁 Upload Manual", "📅 Scheduled Posts"])
     
     # ===== AI GENERATE TAB =====
     with tab1:
@@ -898,6 +898,82 @@ elif page == "🎬 Videos":
                     st.error(f"Upload failed: {response.text}")
             except Exception as e:
                 st.error(f"Error: {e}")
+    
+    # ===== SCHEDULED POSTS TAB =====
+    with tab5:
+        st.subheader("📅 Automated Daily Video Posts")
+        st.caption("Schedule automatic video generation and posting to TikTok")
+        
+        st.markdown("---")
+        
+        # Current schedule status
+        st.write("**🕐 Current Schedule:**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("🎥 **Video Generation:** Daily at 8:00 AM UTC")
+        with col2:
+            st.info("📤 **Auto-Posting:** 9 AM, 2 PM, 7 PM UTC")
+        
+        st.markdown("---")
+        
+        # Configuration
+        st.write("**⚙️ Configuration:**")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            daily_videos = st.number_input(
+                "Videos to Generate Daily",
+                min_value=1,
+                max_value=10,
+                value=3,
+                help="Number of teamwork videos to generate each day"
+            )
+        with col2:
+            posts_per_phone = st.number_input(
+                "Posts per Phone per Day",
+                min_value=1,
+                max_value=5,
+                value=1,
+                help="How many times each phone should post daily"
+            )
+        
+        # Estimated costs
+        daily_cost = daily_videos * 0.24
+        monthly_cost = daily_cost * 30
+        st.write(f"💰 **Estimated Cost:** ${daily_cost:.2f}/day (~${monthly_cost:.2f}/month)")
+        
+        st.markdown("---")
+        
+        # Manual triggers
+        st.write("**🎮 Manual Controls:**")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🎥 Generate Videos Now", use_container_width=True):
+                with st.spinner("Generating videos... This may take a few minutes."):
+                    result = api_post("/videos/batch", {
+                        "count": daily_videos,
+                        "styles": None,  # Random
+                        "skip_overlay": False
+                    })
+                    if result and result.get("success"):
+                        st.success(f"✅ Generated {result.get('successful', 0)} videos! Cost: ${result.get('total_cost_usd', 0):.2f}")
+                    else:
+                        st.error("Failed to generate videos")
+        
+        with col2:
+            if st.button("📤 Post Now (Coming Soon)", use_container_width=True, disabled=True):
+                st.info("GeeLark video posting integration coming soon!")
+        
+        st.markdown("---")
+        
+        # Status info
+        st.write("**📊 Status:**")
+        gen_videos = api_get("/videos/list")
+        if gen_videos:
+            st.success(f"✅ {gen_videos.get('count', 0)} videos ready in library")
+        else:
+            st.warning("No videos generated yet")
 
 
 # ===========================

@@ -70,11 +70,20 @@ class KieClient:
             return response.json()
     
     def _make_request_sync(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Make sync request to Kie API."""
+        """Make sync POST request to Kie API."""
         url = f"{self.BASE_URL}{endpoint}"
         
         with httpx.Client(timeout=60) as client:
             response = client.post(url, json=payload, headers=self.headers)
+            response.raise_for_status()
+            return response.json()
+    
+    def _make_get_request_sync(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Make sync GET request to Kie API."""
+        url = f"{self.BASE_URL}{endpoint}"
+        
+        with httpx.Client(timeout=60) as client:
+            response = client.get(url, params=params, headers=self.headers)
             response.raise_for_status()
             return response.json()
     
@@ -204,10 +213,9 @@ class KieClient:
         Returns:
             KieTaskResult with current state and result URLs if complete
         """
-        payload = {"taskId": task_id}
-        
         try:
-            response = self._make_request_sync("/jobs/queryTask", payload)
+            # queryTask uses GET with taskId as query parameter
+            response = self._make_get_request_sync("/jobs/queryTask", {"taskId": task_id})
             
             if response.get("code") == 200:
                 data = response.get("data", {})
