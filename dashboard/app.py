@@ -327,7 +327,7 @@ page = st.sidebar.radio(
 
 # Version footer - update on each deploy
 st.sidebar.markdown("---")
-st.sidebar.caption(f"v0.4.2 | API: {API_BASE_URL[:40]}...")
+st.sidebar.caption(f"v0.7.0 | API: {API_BASE_URL[:40]}...")
 
 
 # ===========================
@@ -696,39 +696,186 @@ elif page == "🔄 Warmup":
 # ===========================
 
 elif page == "🎬 Videos":
-    st.title("Video Management")
+    st.title("🎬 Video Management")
     
-    tab1, tab2 = st.tabs(["📋 Video Library", "📤 Upload Video"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🤖 AI Generate", "📋 Video Library", "📤 Post to TikTok", "📁 Upload Manual"])
     
+    # ===== AI GENERATE TAB =====
     with tab1:
-        col1, col2 = st.columns([1, 4])
+        st.subheader("🤖 AI Teamwork Video Generator")
+        st.caption("Generate POV videos for teamwork trend using AI (Cost: ~$0.24/video)")
+        
+        col1, col2 = st.columns(2)
         with col1:
-            posted_filter = st.selectbox("Filter", ["All", "Unposted", "Posted"])
+            video_count = st.number_input("Videos to Generate", min_value=1, max_value=20, value=3)
+        with col2:
+            video_style = st.selectbox(
+                "Scene Style",
+                ["Random (Mixed)", "Nature Park", "Beach", "Forest", "City", "Mountain"]
+            )
         
-        endpoint = "/videos"
-        if posted_filter == "Unposted":
-            endpoint += "?posted=false"
-        elif posted_filter == "Posted":
-            endpoint += "?posted=true"
+        # Text overlay options
+        text_overlay = st.selectbox(
+            "Text Overlay",
+            ["Random", "teamwork trend", "teamwork ifb", "teamwork makes the dream work", 
+             "let's go teamwork", "teamwork challenge", "teamwork goals 💪"]
+        )
         
-        videos = api_get(endpoint)
+        skip_overlay = st.checkbox("Skip text overlay (add later in TikTok editor)", value=False)
         
-        if videos and videos["items"]:
+        # Cost estimate
+        estimated_cost = video_count * 0.24
+        st.info(f"💰 Estimated cost: **${estimated_cost:.2f}** for {video_count} videos")
+        
+        if st.button("🎥 Generate Videos", type="primary", use_container_width=True):
+            # Map style selection
+            style_map = {
+                "Random (Mixed)": None,
+                "Nature Park": "nature park",
+                "Beach": "beach",
+                "Forest": "forest",
+                "City": "city",
+                "Mountain": "mountain"
+            }
+            
+            progress = st.progress(0, text="Starting video generation...")
+            status_text = st.empty()
+            
+            if video_count == 1:
+                # Single video
+                result = api_post("/videos/generate", {
+                    "style": style_map.get(video_style),
+                    "text_overlay": None if text_overlay == "Random" else text_overlay,
+                    "skip_overlay": skip_overlay
+                })
+                
+                if result:
+                    if result.get("success"):
+                        st.success(f"✅ Video generated! Cost: ${result.get('cost_usd', 0):.2f}")
+                        st.write(f"**Path:** {result.get('video_path')}")
+                        st.write(f"**Overlay:** {result.get('text_overlay')}")
+                    else:
+                        st.error(f"❌ Failed: {result.get('error')}")
+            else:
+                # Batch generation
+                result = api_post("/videos/batch", {
+                    "count": video_count,
+                    "styles": [style_map.get(video_style)] if video_style != "Random (Mixed)" else None,
+                    "skip_overlay": skip_overlay
+                })
+                
+                if result:
+                    st.success(f"""
+                    ✅ Batch complete!
+                    - **Generated:** {result.get('successful', 0)}/{result.get('total', 0)}
+                    - **Failed:** {result.get('failed', 0)}
+                    - **Total Cost:** ${result.get('total_cost_usd', 0):.2f}
+                    """)
+                    
+                    # Show individual results
+                    with st.expander("View Details"):
+                        for i, vid in enumerate(result.get("videos", [])):
+                            if vid.get("success"):
+                                st.write(f"✅ Video {i+1}: {vid.get('video_path')}")
+                            else:
+                                st.write(f"❌ Video {i+1}: {vid.get('error')}")
+            
+            progress.progress(100, text="Complete!")
+    
+    # ===== VIDEO LIBRARY TAB =====
+    with tab2:
+        st.subheader("📋 Generated Videos")
+        
+        col1, col2 = st.columns([4, 1])
+        with col2:
+            if st.button("🔄 Refresh", key="refresh_videos"):
+                st.rerun()
+        
+        # Get generated videos from new API
+        gen_videos = api_get("/videos/list")
+        
+        if gen_videos and gen_videos.get("videos"):
+            st.write(f"**{gen_videos['count']} videos** in library")
+            
+            for vid in gen_videos["videos"]:
+                with st.container():
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.write(f"**{vid['filename']}**")
+                        st.caption(f"Size: {vid['size_mb']} MB | Created: {vid['created_at'][:16]}")
+                    with col2:
+                        st.write(f"📁 {vid['size_mb']} MB")
+                    with col3:
+                        if st.button("🗑️", key=f"del_{vid['filename']}"):
+                            result = api_delete(f"/videos/{vid['filename']}")
+                            if result and result.get("success"):
+                                st.success("Deleted!")
+                                st.rerun()
+                st.markdown("---")
+        else:
+            st.info("No videos generated yet. Use the 'AI Generate' tab to create teamwork videos!")
+        
+        # Also show old video library
+        st.subheader("📁 Uploaded Videos (Legacy)")
+        old_videos = api_get("/videos")
+        if old_videos and old_videos.get("items"):
             df = pd.DataFrame([{
                 "ID": v["id"],
                 "Filename": v["filename"],
-                "Caption": (v.get("caption", "") or "")[:50] + "...",
                 "Posted": "✅" if v["is_posted"] else "❌",
-                "Account": v.get("account_id", "-"),
-                "Created": v["created_at"][:10]
-            } for v in videos["items"]])
-            
+                "Account": v.get("account_id", "-")
+            } for v in old_videos["items"]])
             st.dataframe(df, use_container_width=True)
-        else:
-            st.info("No videos found. Upload some videos!")
     
-    with tab2:
-        st.subheader("Upload Video")
+    # ===== POST TO TIKTOK TAB =====
+    with tab3:
+        st.subheader("📤 Post Videos to TikTok")
+        st.caption("Select videos and phones to schedule posts")
+        
+        # Get phones
+        phones = api_get("/geelark/phones")
+        
+        if phones and phones.get("items"):
+            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
+            
+            selected_phones = st.multiselect(
+                "Select Phones",
+                options=list(phone_options.keys()),
+                help="Videos will be posted from these phones"
+            )
+            
+            # Get caption
+            caption_result = api_get("/videos/caption")
+            if caption_result:
+                st.write("**Suggested Caption:**")
+                st.info(caption_result.get("full_description", ""))
+                
+                custom_caption = st.text_area(
+                    "Custom Caption (or leave blank for random)",
+                    value="",
+                    placeholder=caption_result.get("caption", "")
+                )
+                
+                hashtags = st.text_input(
+                    "Hashtags",
+                    value=caption_result.get("hashtags", "#teamwork #teamworktrend #fyp")
+                )
+            
+            # Post frequency
+            col1, col2 = st.columns(2)
+            with col1:
+                posts_per_day = st.selectbox("Posts per Day", [1, 2, 3], index=0)
+            with col2:
+                st.info(f"📅 Will post {posts_per_day}x daily per phone")
+            
+            if st.button("📤 Start Posting", type="primary", use_container_width=True, disabled=not selected_phones):
+                st.warning("⚠️ Video posting via GeeLark coming soon! For now, upload videos manually in GeeLark.")
+        else:
+            st.warning("No phones available. Set up phones in the GeeLark page first.")
+    
+    # ===== UPLOAD MANUAL TAB =====
+    with tab4:
+        st.subheader("📁 Upload Video Manually")
         
         uploaded_file = st.file_uploader("Choose a video file", type=["mp4", "mov", "avi"])
         caption = st.text_area("Caption")

@@ -894,3 +894,153 @@ async def run_warmup_on_phone(
             "message": response.message,
             "data": response.data
         }
+
+
+# ===========================
+# Video Generation Routes
+# ===========================
+
+@router.post("/videos/generate")
+async def generate_teamwork_video(
+    data: dict,
+    background_tasks: BackgroundTasks
+):
+    """
+    Generate a single teamwork trend video.
+    
+    Pipeline: Claude prompt → Nano Banana Pro image → Grok video → FFmpeg overlay
+    
+    Cost: ~$0.24 per video
+    """
+    from app.services.video_generator import get_video_generator
+    
+    style = data.get("style", None)  # beach, forest, city, nature, etc.
+    text_overlay = data.get("text_overlay", None)
+    skip_overlay = data.get("skip_overlay", False)
+    
+    try:
+        generator = get_video_generator()
+        result = generator.generate_teamwork_video(
+            style_hint=style,
+            text_overlay=text_overlay,
+            skip_overlay=skip_overlay
+        )
+        
+        return {
+            "success": result.success,
+            "video_path": result.video_path,
+            "image_url": result.image_url,
+            "video_url": result.video_url,
+            "prompt_used": result.prompt_used,
+            "text_overlay": result.text_overlay,
+            "cost_usd": result.cost_usd,
+            "error": result.error
+        }
+    except Exception as e:
+        logger.error(f"Video generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/videos/batch")
+async def generate_video_batch(data: dict):
+    """
+    Generate multiple teamwork trend videos.
+    
+    Args:
+        count: Number of videos (1-20)
+        styles: Optional list of style hints
+        skip_overlay: Skip FFmpeg text overlay
+    """
+    from app.services.video_generator import get_video_generator
+    
+    count = min(data.get("count", 5), 20)  # Cap at 20
+    styles = data.get("styles", None)
+    skip_overlay = data.get("skip_overlay", False)
+    
+    try:
+        generator = get_video_generator()
+        results = generator.generate_batch(
+            count=count,
+            style_hints=styles,
+            skip_overlay=skip_overlay
+        )
+        
+        return {
+            "success": True,
+            "total": len(results),
+            "successful": sum(1 for r in results if r.success),
+            "failed": sum(1 for r in results if not r.success),
+            "total_cost_usd": sum(r.cost_usd for r in results),
+            "videos": [
+                {
+                    "success": r.success,
+                    "video_path": r.video_path,
+                    "text_overlay": r.text_overlay,
+                    "cost_usd": r.cost_usd,
+                    "error": r.error
+                }
+                for r in results
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Batch video generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/videos/list")
+async def list_generated_videos():
+    """List all generated videos in output directory."""
+    from app.services.video_generator import get_video_generator
+    from pathlib import Path
+    
+    generator = get_video_generator()
+    video_dir = generator.output_dir
+    
+    videos = []
+    if video_dir.exists():
+        for video_file in video_dir.glob("teamwork_*.mp4"):
+            stat = video_file.stat()
+            videos.append({
+                "filename": video_file.name,
+                "path": str(video_file),
+                "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat()
+            })
+    
+    # Sort by newest first
+    videos.sort(key=lambda x: x["created_at"], reverse=True)
+    
+    return {
+        "count": len(videos),
+        "videos": videos
+    }
+
+
+@router.get("/videos/caption")
+async def get_random_caption():
+    """Get random caption and hashtags for TikTok post."""
+    from app.services.video_generator import VideoGenerator
+    
+    return {
+        "caption": VideoGenerator.get_random_caption(),
+        "hashtags": VideoGenerator.get_hashtags(),
+        "full_description": VideoGenerator.get_full_description()
+    }
+
+
+@router.delete("/videos/{filename}")
+async def delete_video(filename: str):
+    """Delete a generated video."""
+    from app.services.video_generator import get_video_generator
+    
+    generator = get_video_generator()
+    video_path = generator.output_dir / filename
+    
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    try:
+        video_path.unlink()
+        return {"success": True, "message": f"Deleted {filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
