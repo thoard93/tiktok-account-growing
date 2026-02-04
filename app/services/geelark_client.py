@@ -1512,30 +1512,17 @@ class GeeLarkClient:
         Returns:
             Response with uploadUrl and resourceUrl
         """
-        # Extract file extension to determine file type
+        # Extract file extension
         ext = filename.split(".")[-1].lower() if "." in filename else "mp4"
         
-        # Map extension to FileType as STRING
-        # Error shows field name is 'GetUploadUrlReq.FileType' (capital F and T)
-        file_type_map = {
-            "mp4": "1",
-            "mov": "1", 
-            "avi": "1",
-            "png": "2",
-            "jpg": "2",
-            "jpeg": "2",
-            "apk": "3",
-            "xapk": "4"
-        }
-        file_type = file_type_map.get(ext, "1")  # Default to video
-        
-        # Use exact casing from error: FileType (capital F and T) with string value
+        # Per GeeLark docs: fileType is the file extension as string
+        # Supported: "jpg", "jpeg", "png", "gif", "mp4", "avi", "mov", "apk", "xapk", "xml", "mp3", etc.
         response = self._make_request("/upload/getUrl", {
-            "FileType": file_type  # String: "1" for video
+            "fileType": ext  # String: "mp4", "mov", "jpg", etc.
         })
         
         if response.success:
-            logger.info(f"Got upload URL for {filename} (FileType: {file_type})")
+            logger.info(f"Got upload URL for {filename} (fileType: {ext})")
         else:
             logger.error(f"Failed to get upload URL: {response.message}")
         
