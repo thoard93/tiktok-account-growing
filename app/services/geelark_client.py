@@ -1135,11 +1135,11 @@ class GeeLarkClient:
             results["errors"].append(f"Warmup failed: {e}")
             results["success"] = False
         
-        # 2. Chain AI Comments (starts after warmup is ~80% done)
+        # 2. Chain AI Comments (starts early for concurrent engagement)
         if enable_comments:
             try:
-                # Schedule comments to start 80% through warmup
-                comment_start = schedule_at + int(duration_minutes * 60 * 0.8)
+                # Schedule comments to start 40% through warmup (was 80%)
+                comment_start = schedule_at + int(duration_minutes * 60 * 0.4)
                 
                 comment_variables = {
                     "action": "browse video",
@@ -1160,11 +1160,11 @@ class GeeLarkClient:
             except Exception as e:
                 results["errors"].append(f"Comments failed: {e}")
         
-        # 3. Chain Random Likes on Videos (runs during warmup)
+        # 3. Chain Random Likes on Videos (starts early for concurrent engagement)
         if enable_likes:
             try:
-                # Schedule video likes to start 30% through warmup
-                like_start = schedule_at + int(duration_minutes * 60 * 0.3)
+                # Schedule video likes to start 10% through warmup (was 30%)
+                like_start = schedule_at + int(duration_minutes * 60 * 0.1)
                 
                 like_variables = {
                     "action": "browse video",
@@ -1184,10 +1184,10 @@ class GeeLarkClient:
             except Exception as e:
                 results["errors"].append(f"Video likes failed: {e}")
             
-            # 4. Chain Comment Section Likes (separate phase for follower growth)
+            # 4. Chain Comment Section Likes (runs concurrently)
             try:
-                # Schedule comment likes to start 50% through warmup  
-                comment_like_start = schedule_at + int(duration_minutes * 60 * 0.5)
+                # Schedule comment likes to start 20% through warmup (was 50%)
+                comment_like_start = schedule_at + int(duration_minutes * 60 * 0.2)
                 
                 # Comment likes strategy: open comments frequently, like 3-8 per video
                 comment_like_variables = {

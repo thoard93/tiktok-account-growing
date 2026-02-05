@@ -964,11 +964,13 @@ elif page == "🎬 Videos":
         
         # Current schedule status
         st.write("**🕐 Current Schedule:**")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.info("🎥 **Video Generation:** Daily at 9:00 AM EST")
+            st.info("🧘 **Warmup:** 8:00 AM EST")
         with col2:
-            st.info("📤 **Auto-Posting:** 10 AM, 1 PM, 5 PM EST")
+            st.info("🎥 **Videos:** 9:00 AM EST")
+        with col3:
+            st.info("📤 **Posting:** 10 AM, 1 PM, 5 PM EST")
         
         st.markdown("---")
         
@@ -1006,21 +1008,41 @@ elif page == "🎬 Videos":
         
         col1, col2 = st.columns(2)
         with col1:
-            daily_videos = st.number_input(
-                "Videos to Generate Daily",
-                min_value=1,
-                max_value=10,
-                value=3,
-                help="Number of teamwork videos to generate each day"
-            )
-        with col2:
             posts_per_phone = st.number_input(
                 "Posts per Phone per Day",
                 min_value=1,
                 max_value=5,
-                value=1,
+                value=3,
                 help="How many times each phone should post daily"
             )
+        with col2:
+            # Auto-calculate videos needed
+            num_phones = len(st.session_state.get("scheduled_phones", []))
+            videos_needed = num_phones * posts_per_phone
+            st.metric("📹 Videos to Generate Daily", videos_needed if num_phones > 0 else "-")
+            if num_phones > 0:
+                st.caption(f"{num_phones} phones × {posts_per_phone} posts = {videos_needed} videos")
+        
+        # Store calculated value for use in generation
+        daily_videos = videos_needed if num_phones > 0 else 3
+        
+        # Automation options
+        st.write("**🔧 Automation Options:**")
+        col1, col2 = st.columns(2)
+        with col1:
+            enable_warmup = st.checkbox(
+                "🧘 Include warmup before video generation",
+                value=True,
+                help="Runs enhanced warmup at 8 AM EST (1 hour before video gen)"
+            )
+            st.session_state.enable_warmup = enable_warmup
+        with col2:
+            auto_delete = st.checkbox(
+                "🗑️ Auto-delete videos after posting",
+                value=True,
+                help="Removes videos from library after confirmed posted"
+            )
+            st.session_state.auto_delete_posted = auto_delete
         
         # Estimated costs
         num_phones = len(st.session_state.get("scheduled_phones", [])) or 1
@@ -1066,7 +1088,8 @@ elif page == "🎬 Videos":
                             "caption": "",
                             "hashtags": "#teamwork #teamworktrend #fyp #viral",
                             "auto_start": True,
-                            "auto_stop": True
+                            "auto_stop": True,
+                            "auto_delete": st.session_state.get("auto_delete_posted", True)
                         }, long_timeout=True)
                         
                         if result and result.get("success"):

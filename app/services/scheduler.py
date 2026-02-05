@@ -324,10 +324,10 @@ class AutomationScheduler:
             logger.warning("Scheduler already running")
             return
         
-        # Daily warmup - runs at 10 AM EST (15:00 UTC)
+        # Daily warmup - runs at 8 AM EST (13:00 UTC) - 1 hour before video gen
         self.scheduler.add_job(
             self.run_daily_warmup,
-            CronTrigger(hour=15, minute=0),  # 10 AM EST = 15:00 UTC
+            CronTrigger(hour=13, minute=0),  # 8 AM EST = 13:00 UTC
             id="daily_warmup",
             replace_existing=True,
             max_instances=1

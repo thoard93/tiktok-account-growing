@@ -1233,6 +1233,7 @@ async def post_videos_to_tiktok(
         hashtags: Hashtags string
         auto_start: Whether to auto-start phones (default True)
         auto_stop: Whether to auto-stop phones after posting (default True)
+        auto_delete: Whether to delete videos after successful posting (default False)
     """
     import time
     import requests as req
@@ -1245,6 +1246,7 @@ async def post_videos_to_tiktok(
     hashtags = data.get("hashtags", "#teamwork #fyp #viral")
     auto_start = data.get("auto_start", True)
     auto_stop = data.get("auto_stop", True)
+    auto_delete = data.get("auto_delete", False)
     
     if not video_filenames or not phone_ids:
         raise HTTPException(status_code=400, detail="Videos and phone_ids required")
@@ -1408,6 +1410,21 @@ async def post_videos_to_tiktok(
         else:
             logger.warning(f"Failed to stop phones: {stop_response.message}")
     
+    # Step 5: Auto-delete successfully posted videos
+    deleted_videos = []
+    if auto_delete and successful > 0:
+        logger.info(f"Auto-deleting {successful} successfully posted video(s)...")
+        for r in results:
+            if r.get("success") and r.get("video"):
+                try:
+                    video_path = generator.output_dir / r["video"]
+                    if video_path.exists():
+                        os.remove(video_path)
+                        deleted_videos.append(r["video"])
+                        logger.info(f"Deleted: {r['video']}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete {r['video']}: {e}")
+    
     return {
         "success": successful > 0,
         "total": len(results),
@@ -1415,5 +1432,6 @@ async def post_videos_to_tiktok(
         "failed": failed,
         "phones_started": len(phones_started) if auto_start else 0,
         "phones_stopped": len(phones_started) if auto_stop and phones_started else 0,
+        "videos_deleted": len(deleted_videos),
         "results": results
     }
