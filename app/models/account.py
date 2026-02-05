@@ -202,3 +202,28 @@ class Schedule(Base):
     account = relationship("Account", back_populates="schedules")
     
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScheduleConfig(Base):
+    """
+    Global scheduling configuration - stored in DB for persistence.
+    This survives page refreshes and is readable by the backend scheduler.
+    """
+    __tablename__ = "schedule_config"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(50), unique=True, nullable=False, default="main")  # Config identifier
+    
+    # Scheduling State
+    enabled = Column(Boolean, default=False)
+    phone_ids = Column(JSON, default=[])  # List of GeeLark phone IDs to schedule
+    
+    # Configuration
+    posts_per_phone = Column(Integer, default=3)
+    enable_warmup = Column(Boolean, default=True)
+    auto_delete = Column(Boolean, default=True)
+    
+    # Timestamps
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+

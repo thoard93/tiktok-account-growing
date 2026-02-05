@@ -14,7 +14,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models.account import Account, AccountStatus
+from app.models.account import Account, AccountStatus, ScheduleConfig
 from app.services.warmup_service import WarmupService
 from app.services.posting_service import PostingService
 from app.services.geelark_client import GeeLarkClient
@@ -44,6 +44,38 @@ class AutomationScheduler:
     def _get_db_session(self) -> Session:
         """Get a new database session."""
         return SessionLocal()
+    
+    def _get_schedule_config(self, db: Session = None) -> dict:
+        """
+        Get scheduling configuration from database.
+        Returns enabled status, phone_ids, and other settings.
+        """
+        close_db = False
+        if db is None:
+            db = self._get_db_session()
+            close_db = True
+        
+        try:
+            config = db.query(ScheduleConfig).filter(ScheduleConfig.key == "main").first()
+            if config:
+                return {
+                    "enabled": config.enabled,
+                    "phone_ids": config.phone_ids or [],
+                    "posts_per_phone": config.posts_per_phone,
+                    "enable_warmup": config.enable_warmup,
+                    "auto_delete": config.auto_delete
+                }
+            else:
+                return {
+                    "enabled": False,
+                    "phone_ids": [],
+                    "posts_per_phone": 3,
+                    "enable_warmup": True,
+                    "auto_delete": True
+                }
+        finally:
+            if close_db:
+                db.close()
     
     # ===========================
     # Warmup Jobs
@@ -141,6 +173,25 @@ class AutomationScheduler:
         """
         logger.info("Starting daily video generation job...")
         
+        # Check if scheduling is enabled in database
+        config = self._get_schedule_config()
+        if not config.get("enabled"):
+            logger.info("Scheduling is DISABLED in database config - skipping video generation")
+            return
+        
+        phone_ids = config.get("phone_ids", [])
+        posts_per_phone = config.get("posts_per_phone", 3)
+        auto_delete = config.get("auto_delete", True)
+        
+        if not phone_ids:
+            logger.warning("No phones configured for scheduling - skipping video generation")
+            return
+        
+        # Calculate videos needed: phones × posts per phone
+        videos_needed = len(phone_ids) * posts_per_phone
+        
+        logger.info(f"Schedule config: {len(phone_ids)} phones × {posts_per_phone} posts = {videos_needed} videos needed")
+        
         try:
             from app.services.video_generator import get_video_generator
             import requests
@@ -148,10 +199,11 @@ class AutomationScheduler:
             
             generator = get_video_generator()
             
-            # Generate 3 videos with different styles
+            # Generate required number of videos
+            style_hints = ["nature", "beach", "city", "sunset", "mountains"][:videos_needed]
             results = generator.generate_batch(
-                count=3,
-                style_hints=["nature", "beach", "city"],
+                count=videos_needed,
+                style_hints=style_hints,
                 skip_overlay=False
             )
             
@@ -165,44 +217,36 @@ class AutomationScheduler:
                 f"{len(failed)} failed, total cost: ${total_cost:.2f}"
             )
             
-            # Auto-post to phones if we have videos and a configured API
-            if successful:
+            # Auto-post to configured phones
+            if successful and phone_ids:
                 video_filenames = [os.path.basename(r.video_path) for r in successful if r.video_path]
                 logger.info(f"Videos ready for posting: {video_filenames}")
                 
-                # Get phone IDs from running/available phones
-                phones_response = self.geelark.list_phones(page=1, page_size=10)
-                if phones_response.success and phones_response.data:
-                    items = phones_response.data.get("items", [])
-                    phone_ids = [p["id"] for p in items if p.get("openStatus") in [0, 2]][:1]  # First one
-                    
-                    if phone_ids and video_filenames:
-                        logger.info(f"Auto-posting {len(video_filenames)} videos to {len(phone_ids)} phones with auto start/stop...")
-                        
-                        # Use internal API call to post/batch endpoint (handles all the flow)
-                        api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
-                        try:
-                            resp = requests.post(
-                                f"{api_base}/api/videos/post/batch",
-                                json={
-                                    "videos": video_filenames,
-                                    "phone_ids": phone_ids,
-                                    "caption": "",
-                                    "hashtags": "#teamwork #teamworktrend #fyp #viral",
-                                    "auto_start": True,
-                                    "auto_stop": True
-                                },
-                                timeout=300  # 5 min timeout for phone boot + upload
-                            )
-                            if resp.status_code == 200:
-                                result = resp.json()
-                                logger.info(f"Auto-posting result: {result.get('successful', 0)}/{result.get('total', 0)} success")
-                            else:
-                                logger.error(f"Auto-posting failed: {resp.status_code} - {resp.text}")
-                        except Exception as e:
-                            logger.error(f"Auto-posting request failed: {e}")
+                logger.info(f"Auto-posting {len(video_filenames)} videos to {len(phone_ids)} phones with auto start/stop...")
+                
+                # Use internal API call to post/batch endpoint (handles all the flow)
+                api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+                try:
+                    resp = requests.post(
+                        f"{api_base}/api/videos/post/batch",
+                        json={
+                            "videos": video_filenames,
+                            "phone_ids": phone_ids,
+                            "caption": "",
+                            "hashtags": "#teamwork #teamworktrend #fyp #viral",
+                            "auto_start": True,
+                            "auto_stop": True,
+                            "auto_delete": auto_delete
+                        },
+                        timeout=300  # 5 min timeout for phone boot + upload
+                    )
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        logger.info(f"Auto-posting result: {result.get('successful', 0)}/{result.get('total', 0)} success, {result.get('videos_deleted', 0)} deleted")
                     else:
-                        logger.warning("No phones available for auto-posting")
+                        logger.error(f"Auto-posting failed: {resp.status_code} - {resp.text}")
+                except Exception as e:
+                    logger.error(f"Auto-posting request failed: {e}")
             
         except Exception as e:
             logger.error(f"Daily video generation failed: {e}")

@@ -13,7 +13,7 @@ from loguru import logger
 
 from app.database import get_db
 from app.config import get_settings
-from app.models.account import Account, Proxy, Video, ActivityLog, AccountStatus
+from app.models.account import Account, Proxy, Video, ActivityLog, AccountStatus, ScheduleConfig
 from app.services.geelark_client import GeeLarkClient
 from app.services.account_manager import AccountManager
 from app.services.warmup_service import WarmupService
@@ -1435,3 +1435,79 @@ async def post_videos_to_tiktok(
         "videos_deleted": len(deleted_videos),
         "results": results
     }
+
+
+# ===========================
+# Schedule Config Routes
+# ===========================
+
+@router.get("/schedule/config", tags=["Schedule"])
+async def get_schedule_config(db: Session = Depends(get_db)):
+    """
+    Get the current scheduling configuration from database.
+    Returns default values if no config exists.
+    """
+    config = db.query(ScheduleConfig).filter(ScheduleConfig.key == "main").first()
+    
+    if not config:
+        # Return defaults
+        return {
+            "enabled": False,
+            "phone_ids": [],
+            "posts_per_phone": 3,
+            "enable_warmup": True,
+            "auto_delete": True,
+            "updated_at": None
+        }
+    
+    return {
+        "enabled": config.enabled,
+        "phone_ids": config.phone_ids or [],
+        "posts_per_phone": config.posts_per_phone,
+        "enable_warmup": config.enable_warmup,
+        "auto_delete": config.auto_delete,
+        "updated_at": config.updated_at.isoformat() if config.updated_at else None
+    }
+
+
+@router.post("/schedule/config", tags=["Schedule"])
+async def save_schedule_config(data: dict, db: Session = Depends(get_db)):
+    """
+    Save scheduling configuration to database.
+    Creates or updates the 'main' config entry.
+    """
+    config = db.query(ScheduleConfig).filter(ScheduleConfig.key == "main").first()
+    
+    if not config:
+        # Create new config
+        config = ScheduleConfig(key="main")
+        db.add(config)
+    
+    # Update fields
+    if "enabled" in data:
+        config.enabled = data["enabled"]
+    if "phone_ids" in data:
+        config.phone_ids = data["phone_ids"]
+    if "posts_per_phone" in data:
+        config.posts_per_phone = data["posts_per_phone"]
+    if "enable_warmup" in data:
+        config.enable_warmup = data["enable_warmup"]
+    if "auto_delete" in data:
+        config.auto_delete = data["auto_delete"]
+    
+    config.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(config)
+    
+    logger.info(f"Schedule config updated: enabled={config.enabled}, phones={len(config.phone_ids or [])}")
+    
+    return {
+        "success": True,
+        "enabled": config.enabled,
+        "phone_ids": config.phone_ids or [],
+        "posts_per_phone": config.posts_per_phone,
+        "enable_warmup": config.enable_warmup,
+        "auto_delete": config.auto_delete,
+        "updated_at": config.updated_at.isoformat() if config.updated_at else None
+    }
+

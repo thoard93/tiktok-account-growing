@@ -977,6 +977,11 @@ elif page == "🎬 Videos":
         # Configuration
         st.write("**⚙️ Configuration:**")
         
+        # Load saved config from database (persists across page refresh)
+        saved_config = api_get("/schedule/config")
+        if saved_config is None:
+            saved_config = {"enabled": False, "phone_ids": [], "posts_per_phone": 3, "enable_warmup": True, "auto_delete": True}
+        
         # Fetch phones for selection
         phones_data = api_get("/geelark/phones")
         available_phones = []
@@ -985,25 +990,27 @@ elif page == "🎬 Videos":
         
         if available_phones:
             phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in available_phones}
+            phone_id_to_name = {v: k for k, v in phone_options.items()}
             
-            # Phone selection (stored in session state)
-            if "scheduled_phones" not in st.session_state:
-                st.session_state.scheduled_phones = []
+            # Pre-select phones from saved config
+            default_selection = [phone_id_to_name[pid] for pid in saved_config.get("phone_ids", []) if pid in phone_id_to_name]
             
             selected_phones = st.multiselect(
                 "📱 Phones for Daily Posting",
                 options=list(phone_options.keys()),
-                default=[k for k in phone_options.keys() if phone_options[k] in st.session_state.scheduled_phones],
+                default=default_selection,
                 help="Select which phones should receive daily video posts"
             )
             
-            # Update session state with selected phone IDs
-            st.session_state.scheduled_phones = [phone_options[name] for name in selected_phones]
+            # Store selected phone IDs (for use in buttons)
+            selected_phone_ids = [phone_options[name] for name in selected_phones]
+            st.session_state.scheduled_phones = selected_phone_ids
             
             if not selected_phones:
                 st.warning("⚠️ Select at least one phone for automated posting")
         else:
             st.warning("⚠️ No phones available. Create phones in GeeLark first.")
+            selected_phone_ids = []
             st.session_state.scheduled_phones = []
         
         col1, col2 = st.columns(2)
@@ -1108,35 +1115,49 @@ elif page == "🎬 Videos":
         # Scheduling Controls
         st.write("**📅 Scheduling Controls:**")
         
-        # Initialize scheduling state
-        if "scheduling_enabled" not in st.session_state:
-            st.session_state.scheduling_enabled = False
+        # Use saved_config from database (loaded earlier in this tab)
+        scheduling_enabled = saved_config.get("enabled", False)
         
         col1, col2, col3 = st.columns([2, 2, 2])
         
         with col1:
-            if not st.session_state.scheduling_enabled:
+            if not scheduling_enabled:
                 if st.button("✅ Enable Daily Scheduling", use_container_width=True, type="primary", 
-                             disabled=not st.session_state.get("scheduled_phones")):
-                    st.session_state.scheduling_enabled = True
-                    st.success("🎉 Daily scheduling enabled!")
-                    st.info(f"📱 Phones: {len(st.session_state.scheduled_phones)} | 🎥 Videos/day: {daily_videos} | 📤 Posts/phone: {posts_per_phone}")
-                    st.rerun()
+                             disabled=not selected_phone_ids):
+                    # Save to database API
+                    result = api_post("/schedule/config", {
+                        "enabled": True,
+                        "phone_ids": selected_phone_ids,
+                        "posts_per_phone": posts_per_phone,
+                        "enable_warmup": st.session_state.get("enable_warmup", True),
+                        "auto_delete": st.session_state.get("auto_delete_posted", True)
+                    })
+                    if result and result.get("success"):
+                        st.success("🎉 Daily scheduling enabled and saved!")
+                        st.info(f"📱 Phones: {len(selected_phone_ids)} | 🎥 Videos/day: {daily_videos} | 📤 Posts/phone: {posts_per_phone}")
+                        st.rerun()
+                    else:
+                        st.error("Failed to save config")
             else:
                 st.success("✅ Scheduling is **ENABLED**")
         
         with col2:
-            if st.session_state.scheduling_enabled:
+            if scheduling_enabled:
                 if st.button("⏹️ Disable Scheduling", use_container_width=True):
-                    st.session_state.scheduling_enabled = False
-                    st.warning("Scheduling disabled")
-                    st.rerun()
+                    # Disable in database
+                    result = api_post("/schedule/config", {"enabled": False})
+                    if result and result.get("success"):
+                        st.warning("Scheduling disabled")
+                        st.rerun()
         
         with col3:
-            if st.session_state.scheduling_enabled:
-                st.caption(f"📱 {len(st.session_state.get('scheduled_phones', []))} phones configured")
+            if scheduling_enabled:
+                phone_count = len(saved_config.get("phone_ids", []))
+                st.caption(f"📱 {phone_count} phones configured")
+                if saved_config.get("updated_at"):
+                    st.caption(f"Last saved: {saved_config['updated_at'][:16]}")
         
-        if not st.session_state.get("scheduled_phones"):
+        if not selected_phone_ids:
             st.warning("⚠️ Select phones above before enabling scheduling")
         
         st.markdown("---")
@@ -1150,8 +1171,8 @@ elif page == "🎬 Videos":
             st.warning("No videos generated yet")
         
         # Show scheduling log summary
-        if st.session_state.scheduling_enabled:
-            st.info("🔄 Next scheduled run: Check server logs for exact times")
+        if scheduling_enabled:
+            st.info("🔄 Scheduler active! Check server logs for exact run times")
     
     # ===== TASK LOGS TAB =====
     with tab6:
