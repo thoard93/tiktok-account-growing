@@ -304,7 +304,10 @@ class PhoneStartRequest(BaseModel):
 
 
 class TaskQueryRequest(BaseModel):
-    task_ids: List[str] = Field(..., max_length=100)
+    task_ids: Optional[List[str]] = Field(None, max_length=100)
+    task_type: Optional[int] = Field(None, description="Filter by task type (1=video post, etc)")
+    page: int = Field(1, ge=1)
+    page_size: int = Field(50, ge=1, le=100)
 
 
 class TaskCancelRequest(BaseModel):

@@ -811,13 +811,24 @@ elif page == "🎬 Videos":
         st.subheader("📁 Uploaded Videos (Legacy)")
         old_videos = api_get("/videos")
         if old_videos and old_videos.get("items"):
-            df = pd.DataFrame([{
-                "ID": v["id"],
-                "Filename": v["filename"],
-                "Posted": "✅" if v["is_posted"] else "❌",
-                "Account": v.get("account_id", "-")
-            } for v in old_videos["items"]])
-            st.dataframe(df, use_container_width=True)
+            for v in old_videos["items"]:
+                col1, col2, col3, col4, col5 = st.columns([1, 3, 1, 1, 1])
+                with col1:
+                    st.write(f"**#{v['id']}**")
+                with col2:
+                    st.write(v["filename"])
+                with col3:
+                    st.write("✅" if v["is_posted"] else "❌")
+                with col4:
+                    st.write(v.get("account_id") or "-")
+                with col5:
+                    if st.button("🗑️", key=f"del_legacy_{v['id']}"):
+                        result = api_delete(f"/videos/legacy/{v['id']}")
+                        if result:
+                            st.success("Deleted!")
+                            st.rerun()
+        else:
+            st.info("No legacy videos uploaded.")
     
     # ===== POST TO TIKTOK TAB =====
     with tab3:
@@ -1071,6 +1082,42 @@ elif page == "🎬 Videos":
         
         st.markdown("---")
         
+        # Scheduling Controls
+        st.write("**📅 Scheduling Controls:**")
+        
+        # Initialize scheduling state
+        if "scheduling_enabled" not in st.session_state:
+            st.session_state.scheduling_enabled = False
+        
+        col1, col2, col3 = st.columns([2, 2, 2])
+        
+        with col1:
+            if not st.session_state.scheduling_enabled:
+                if st.button("✅ Enable Daily Scheduling", use_container_width=True, type="primary", 
+                             disabled=not st.session_state.get("scheduled_phones")):
+                    st.session_state.scheduling_enabled = True
+                    st.success("🎉 Daily scheduling enabled!")
+                    st.info(f"📱 Phones: {len(st.session_state.scheduled_phones)} | 🎥 Videos/day: {daily_videos} | 📤 Posts/phone: {posts_per_phone}")
+                    st.rerun()
+            else:
+                st.success("✅ Scheduling is **ENABLED**")
+        
+        with col2:
+            if st.session_state.scheduling_enabled:
+                if st.button("⏹️ Disable Scheduling", use_container_width=True):
+                    st.session_state.scheduling_enabled = False
+                    st.warning("Scheduling disabled")
+                    st.rerun()
+        
+        with col3:
+            if st.session_state.scheduling_enabled:
+                st.caption(f"📱 {len(st.session_state.get('scheduled_phones', []))} phones configured")
+        
+        if not st.session_state.get("scheduled_phones"):
+            st.warning("⚠️ Select phones above before enabling scheduling")
+        
+        st.markdown("---")
+        
         # Status info
         st.write("**📊 Status:**")
         gen_videos = api_get("/videos/list")
@@ -1078,6 +1125,10 @@ elif page == "🎬 Videos":
             st.success(f"✅ {gen_videos.get('count', 0)} videos ready in library")
         else:
             st.warning("No videos generated yet")
+        
+        # Show scheduling log summary
+        if st.session_state.scheduling_enabled:
+            st.info("🔄 Next scheduled run: Check server logs for exact times")
     
     # ===== TASK LOGS TAB =====
     with tab6:
@@ -1088,11 +1139,11 @@ elif page == "🎬 Videos":
         if st.button("🔄 Refresh Task Status", key="refresh_video_tasks"):
             st.rerun()
         
-        # Fetch tasks with taskType=1 (video posting)
+        # Fetch tasks with task_type=1 (video posting)
         tasks_result = api_post("/geelark/tasks/query", {
-            "taskType": 1,  # Video posting tasks only
+            "task_type": 1,  # Video posting tasks only
             "page": 1,
-            "pageSize": 50
+            "page_size": 50
         })
         
         if tasks_result and tasks_result.get("items"):

@@ -656,6 +656,30 @@ async def upload_video(
     return video
 
 
+@router.delete("/videos/legacy/{video_id}", tags=["Videos"])
+async def delete_legacy_video(
+    video_id: int,
+    db: Session = Depends(get_db)
+):
+    """Delete a legacy video from the database."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    # Also delete the file if it exists
+    if video.filepath:
+        try:
+            import os
+            if os.path.exists(video.filepath):
+                os.remove(video.filepath)
+        except Exception:
+            pass  # File might not exist
+    
+    db.delete(video)
+    db.commit()
+    return {"success": True, "message": f"Video {video_id} deleted"}
+
+
 @router.post("/videos/{video_id}/post", tags=["Videos"])
 async def post_video(
     video_id: int,
@@ -781,10 +805,32 @@ async def query_geelark_tasks(
     data: TaskQueryRequest,
     geelark: GeeLarkClient = Depends(get_geelark_client)
 ):
-    """Query task status from GeeLark."""
-    response = geelark.query_tasks(data.task_ids)
+    """Query task status from GeeLark. If task_ids provided, queries specific tasks. Otherwise returns task history."""
+    # If specific task IDs provided, query those
+    if data.task_ids:
+        response = geelark.query_tasks(data.task_ids)
+        if response.success:
+            return {"items": response.data if isinstance(response.data, list) else [], "total": len(response.data or [])}
+        raise HTTPException(status_code=500, detail=response.message)
+    
+    # Otherwise, get task history (last 7 days)
+    history_data = {"size": data.page_size}
+    response = geelark._make_request("/task/historyRecords", history_data)
+    
     if response.success:
-        return response.data
+        items = response.data.get("list", []) if response.data else []
+        
+        # Filter by task_type if specified
+        if data.task_type is not None:
+            items = [t for t in items if t.get("taskType") == data.task_type]
+        
+        return {
+            "items": items,
+            "total": len(items),
+            "page": data.page,
+            "page_size": data.page_size
+        }
+    
     raise HTTPException(status_code=500, detail=response.message)
 
 
