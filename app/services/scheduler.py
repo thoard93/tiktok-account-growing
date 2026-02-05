@@ -324,19 +324,19 @@ class AutomationScheduler:
             logger.warning("Scheduler already running")
             return
         
-        # Daily warmup - runs at configured time each day
+        # Daily warmup - runs at 10 AM EST (15:00 UTC)
         self.scheduler.add_job(
             self.run_daily_warmup,
-            CronTrigger(hour=10, minute=0),  # 10 AM UTC
+            CronTrigger(hour=15, minute=0),  # 10 AM EST = 15:00 UTC
             id="daily_warmup",
             replace_existing=True,
             max_instances=1
         )
         
-        # Auto-posting - runs multiple times per day for active accounts
+        # Auto-posting - 10 AM, 1 PM, 5 PM EST = 15, 18, 22 UTC
         self.scheduler.add_job(
             self.run_auto_posting,
-            CronTrigger(hour="9,14,19"),  # 9 AM, 2 PM, 7 PM UTC
+            CronTrigger(hour="15,18,22"),  # 10 AM, 1 PM, 5 PM EST
             id="auto_posting",
             replace_existing=True,
             max_instances=1
@@ -369,10 +369,10 @@ class AutomationScheduler:
             max_instances=1
         )
         
-        # Daily video generation - runs at 8 AM UTC to generate teamwork videos
+        # Daily video generation - 9 AM EST = 14:00 UTC
         self.scheduler.add_job(
             self.run_daily_video_generation,
-            CronTrigger(hour=8, minute=0),  # 8 AM UTC
+            CronTrigger(hour=14, minute=0),  # 9 AM EST = 14:00 UTC
             id="daily_video_generation",
             replace_existing=True,
             max_instances=1

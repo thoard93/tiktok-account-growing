@@ -966,9 +966,9 @@ elif page == "🎬 Videos":
         st.write("**🕐 Current Schedule:**")
         col1, col2 = st.columns(2)
         with col1:
-            st.info("🎥 **Video Generation:** Daily at 3:00 AM EST")
+            st.info("🎥 **Video Generation:** Daily at 9:00 AM EST")
         with col2:
-            st.info("📤 **Auto-Posting:** 4 AM, 9 AM, 2 PM EST")
+            st.info("📤 **Auto-Posting:** 10 AM, 1 PM, 5 PM EST")
         
         st.markdown("---")
         
