@@ -955,14 +955,43 @@ elif page == "🎬 Videos":
         st.write("**🕐 Current Schedule:**")
         col1, col2 = st.columns(2)
         with col1:
-            st.info("🎥 **Video Generation:** Daily at 8:00 AM UTC")
+            st.info("🎥 **Video Generation:** Daily at 3:00 AM EST")
         with col2:
-            st.info("📤 **Auto-Posting:** 9 AM, 2 PM, 7 PM UTC")
+            st.info("📤 **Auto-Posting:** 4 AM, 9 AM, 2 PM EST")
         
         st.markdown("---")
         
         # Configuration
         st.write("**⚙️ Configuration:**")
+        
+        # Fetch phones for selection
+        phones_data = api_get("/geelark/phones")
+        available_phones = []
+        if phones_data and phones_data.get("items"):
+            available_phones = phones_data["items"]
+        
+        if available_phones:
+            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in available_phones}
+            
+            # Phone selection (stored in session state)
+            if "scheduled_phones" not in st.session_state:
+                st.session_state.scheduled_phones = []
+            
+            selected_phones = st.multiselect(
+                "📱 Phones for Daily Posting",
+                options=list(phone_options.keys()),
+                default=[k for k in phone_options.keys() if phone_options[k] in st.session_state.scheduled_phones],
+                help="Select which phones should receive daily video posts"
+            )
+            
+            # Update session state with selected phone IDs
+            st.session_state.scheduled_phones = [phone_options[name] for name in selected_phones]
+            
+            if not selected_phones:
+                st.warning("⚠️ Select at least one phone for automated posting")
+        else:
+            st.warning("⚠️ No phones available. Create phones in GeeLark first.")
+            st.session_state.scheduled_phones = []
         
         col1, col2 = st.columns(2)
         with col1:
@@ -983,9 +1012,11 @@ elif page == "🎬 Videos":
             )
         
         # Estimated costs
+        num_phones = len(st.session_state.get("scheduled_phones", [])) or 1
         daily_cost = daily_videos * 0.24
         monthly_cost = daily_cost * 30
         st.write(f"💰 **Estimated Cost:** ${daily_cost:.2f}/day (~${monthly_cost:.2f}/month)")
+        st.caption(f"📱 {num_phones} phone(s) selected × {posts_per_phone} post(s)/day = {num_phones * posts_per_phone} total posts/day")
         
         st.markdown("---")
         
@@ -1007,8 +1038,36 @@ elif page == "🎬 Videos":
                     st.error("Failed to start video generation")
         
         with col2:
-            if st.button("📤 Post Now (Coming Soon)", use_container_width=True, disabled=True):
-                st.info("GeeLark video posting integration coming soon!")
+            # Only enable if phones are selected and videos exist
+            can_post = len(st.session_state.get("scheduled_phones", [])) > 0
+            
+            if st.button("📤 Post Now", use_container_width=True, disabled=not can_post):
+                # Get available videos
+                videos_resp = api_get("/videos/list")
+                if videos_resp and videos_resp.get("videos"):
+                    video_filenames = videos_resp["videos"][:3]  # Post up to 3
+                    phone_ids = st.session_state.scheduled_phones
+                    
+                    with st.spinner(f"📤 Posting {len(video_filenames)} video(s) to {len(phone_ids)} phone(s)..."):
+                        result = api_post("/videos/post/batch", {
+                            "videos": video_filenames,
+                            "phone_ids": phone_ids,
+                            "caption": "",
+                            "hashtags": "#teamwork #teamworktrend #fyp #viral",
+                            "auto_start": True,
+                            "auto_stop": True
+                        }, long_timeout=True)
+                        
+                        if result and result.get("success"):
+                            st.success(f"✅ Posted {result.get('successful', 0)}/{result.get('total', 0)} successfully!")
+                            st.info("Check the **Task Logs** tab to monitor progress")
+                        else:
+                            st.error(f"Posting failed: {result}")
+                else:
+                    st.error("No videos available. Generate some first!")
+            
+            if not can_post:
+                st.caption("⚠️ Select phones above to enable posting")
         
         st.markdown("---")
         
