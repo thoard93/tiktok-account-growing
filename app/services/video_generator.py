@@ -45,14 +45,16 @@ class GeneratedVideo:
 
 # Image prompt templates (for Claude to enhance)
 IMAGE_PROMPT_TEMPLATES = [
-    "POV shot walking through a sunny nature park trail with green trees and dappled sunlight",
-    "POV walking along a beautiful beach at golden hour sunset with gentle waves",
-    "POV strolling through a vibrant city park in spring with blooming flowers",
-    "POV hiking a scenic mountain trail with stunning vistas ahead",
-    "POV walking along a waterfront boardwalk with boats and calm water",
-    "POV exploring a peaceful forest path with sunlight filtering through leaves",
-    "POV walking through a beautiful garden with colorful flowers",
-    "POV strolling downtown city street with nice architecture and trees"
+    "POV leisurely stroll through a sun-dappled city park, golden afternoon light filtering through cherry blossom trees, warm peaceful atmosphere",
+    "POV relaxed walk along a pristine sandy beach at golden hour, soft warm sunlight, gentle ocean waves, serene coastal scenery",
+    "POV calm stroll through vibrant downtown streets, beautiful architecture, soft evening golden hour lighting, lively urban energy",
+    "POV peaceful walk through a lush forest trail, soft diffused sunlight through tall trees, rich earthy greens, tranquil woodland atmosphere",
+    "POV scenic stroll along a mountain trail overlook, breathtaking vista ahead, soft warm golden sunrise lighting, majestic peaks",
+    "POV gentle walk through Japanese garden path, soft morning light, koi pond reflections, peaceful zen atmosphere",
+    "POV relaxed stroll through autumn woods, golden maple leaves, warm soft sunlight, cozy fall atmosphere",
+    "POV calming walk along a quiet riverside path, soft golden sunset reflections on water, peaceful nature scene",
+    "POV morning stroll through lavender fields, soft purple hues, warm golden sunlight, dreamy pastoral scene",
+    "POV evening walk through a European cobblestone street, warm street lamp glow, charming old town atmosphere"
 ]
 
 # Text overlays for videos
@@ -84,10 +86,11 @@ HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedreamwo
 
 # Video motion prompts
 VIDEO_MOTION_PROMPTS = [
-    "Smooth steady camera walking forward motion through the scene, natural subtle movement",
-    "Gentle forward walking motion, steady POV camera movement exploring the area",
-    "Calm walking movement through the scene, steady smooth camera motion",
-    "Natural walking pace forward through the environment, relaxed camera motion"
+    "Smooth cinematic forward walking motion, gentle sway like a peaceful stroll, soft natural camera movement",
+    "Leisurely walking pace through the scene, calm steady glide forward, relaxed exploration motion",
+    "Gentle forward strolling motion with subtle natural sway, dreamy smooth camera movement through the scenery",
+    "Peaceful walking motion through the environment, soft cinematic camera glide, calming steady pace forward",
+    "Natural walking stroll movement, gentle bobbing motion, serene exploration of the beautiful scene"
 ]
 
 
@@ -138,14 +141,14 @@ class VideoGenerator:
             return f"{template}, motivational aesthetic, 9:16 vertical format, cinematic quality, vibrant colors"
         
         try:
-            system_prompt = """You are a creative prompt engineer for AI image generation. Generate short, vivid image prompts for POV walking/exploring videos in beautiful outdoor locations. 
+            system_prompt = """You are a creative prompt engineer for AI image generation. Generate short, vivid image prompts for POV leisurely stroll videos in beautiful scenic locations.
 
 Requirements:
 - POV (first person) perspective looking OUT at scenery (NOT looking down at feet/legs)
 - NO feet, legs, or shoes visible - focus on the landscape/horizon
-- Upper body or hands only if person shown
-- Outdoor scene: nature, beach, city park, forest, mountain view, etc.
-- Motivational/positive vibe
+- Beautiful scenic stroll locations: city parks, beaches, forests, downtown streets, mountain trails, gardens, riverside paths
+- ALWAYS include golden hour lighting, soft warm sunlight, or beautiful natural lighting
+- Emphasize peaceful, calming atmosphere and rich colors
 - 9:16 vertical format optimized
 - Short but descriptive (1-2 sentences)
 
@@ -602,9 +605,10 @@ Just output the prompt, nothing else."""
             else:
                 logger.error(f"Video {i+1} failed: {result.error}")
             
-            # Small delay between generations
+            # Delay between generations to avoid API rate limiting
             if i < count - 1:
-                time.sleep(2)
+                logger.info(f"Waiting 10s before next video...")
+                time.sleep(10)
         
         return results
     

@@ -652,45 +652,157 @@ elif page == "👤 Accounts":
 # ===========================
 
 elif page == "🔄 Warmup":
-    st.title("Warmup Automation")
-    
-    # Pending warmups
-    st.subheader("Accounts Pending Warmup")
-    pending = api_get("/warmup/pending")
-    
-    if pending:
-        df = pd.DataFrame([{
-            "ID": a["id"],
-            "Name": a.get("geelark_profile_name", "N/A"),
-            "Day": a["warmup_day"],
-            "Last Activity": a.get("last_activity", "-")
-        } for a in pending])
-        
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("No accounts currently warming up.")
+    st.title("🔄 Warmup Automation")
+    st.caption("Warm up accounts with browsing, likes, and comments before posting")
     
     st.markdown("---")
     
-    # Actions
+    # ===== SCHEDULE DISPLAY =====
+    st.write("**📅 Warmup Schedule:**")
     col1, col2 = st.columns(2)
-    
     with col1:
-        st.subheader("Start Warmup")
-        account_ids_str = st.text_input("Account IDs (comma-separated)")
-        if st.button("🚀 Start Warmup"):
-            if account_ids_str:
-                ids = [int(x.strip()) for x in account_ids_str.split(",")]
-                result = api_post("/warmup/start", {"account_ids": ids})
-                if result:
-                    st.success(f"Started: {result['started']}, Failed: {result['failed']}")
+        st.info("🧘 **Daily Warmup:** 8:00 AM EST")
+    with col2:
+        # Load schedule config to show if enabled
+        sched_config = api_get("/schedule/config")
+        if sched_config and sched_config.get("enabled") and sched_config.get("enable_warmup"):
+            st.success("✅ **Scheduling ENABLED**")
+        else:
+            st.warning("⏸️ Scheduling disabled - enable in Videos > Scheduled Posts")
+    
+    st.markdown("---")
+    
+    # ===== PHONE SELECTION =====
+    st.write("**📱 Select Phones for Warmup:**")
+    
+    phones_data = api_get("/geelark/phones")
+    available_phones = []
+    if phones_data and phones_data.get("items"):
+        available_phones = phones_data["items"]
+    
+    if available_phones:
+        phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in available_phones}
+        
+        selected_warmup_phones = st.multiselect(
+            "Phones",
+            options=list(phone_options.keys()),
+            help="Select phones to run warmup on",
+            key="warmup_phone_select"
+        )
+        
+        selected_phone_ids = [phone_options[name] for name in selected_warmup_phones]
+        
+        if not selected_warmup_phones:
+            st.caption("⚠️ Select at least one phone to run warmup")
+    else:
+        st.warning("⚠️ No phones available. Create phones in GeeLark first.")
+        selected_phone_ids = []
+    
+    st.markdown("---")
+    
+    # ===== ENHANCED WARMUP OPTIONS =====
+    st.write("**⚙️ Warmup Configuration:**")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        warmup_duration = st.slider(
+            "Duration (minutes)", 
+            min_value=10, max_value=60, value=30,
+            help="How long to browse TikTok during warmup"
+        )
+        
+        enable_likes = st.checkbox("👍 Enable Random Likes", value=True, help="Like videos during browsing")
+        like_probability = 30
+        if enable_likes:
+            like_probability = st.slider("Like Probability (%)", 10, 80, 30, key="warmup_like_prob")
     
     with col2:
-        st.subheader("Run Warmup Session")
-        if st.button("▶️ Run Session for All Pending"):
-            result = api_post("/warmup/run-session", {})
-            if result:
-                st.success(f"Success: {result['success']}, Failed: {result['failed']}, Completed: {result['completed']}")
+        keywords_input = st.text_input(
+            "🔍 Keywords (comma-separated)",
+            value="teamwork, motivation, fyp",
+            help="Keywords for targeted browsing"
+        )
+        keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
+        
+        enable_comments = st.checkbox("💬 Enable AI Comments", value=True, help="Post AI-generated comments")
+    
+    st.markdown("---")
+    
+    # ===== ACTIONS =====
+    st.write("**▶️ Manual Warmup:**")
+    
+    col1, col2, col3 = st.columns([2, 2, 2])
+    
+    with col1:
+        if st.button("🚀 Run Enhanced Warmup Now", type="primary", 
+                     disabled=not selected_phone_ids, use_container_width=True):
+            with st.spinner("Starting enhanced warmup..."):
+                result = api_post("/geelark/warmup/enhanced", {
+                    "phone_ids": selected_phone_ids,
+                    "duration_minutes": warmup_duration,
+                    "keywords": keywords,
+                    "enable_comments": enable_comments,
+                    "enable_likes": enable_likes,
+                    "like_probability": like_probability
+                })
+                
+                if result and result.get("success"):
+                    st.success(f"✅ Enhanced warmup started!")
+                    st.info(f"📋 Main Task ID: {result.get('main_task_id', 'N/A')}")
+                    if result.get("chained_tasks"):
+                        for task_name, task_id in result["chained_tasks"].items():
+                            st.caption(f"  • {task_name}: {task_id}")
+                else:
+                    st.error(f"Failed: {result}")
+    
+    with col2:
+        if st.button("▶️ Basic Browse Only", disabled=not selected_phone_ids, use_container_width=True):
+            result = api_post("/geelark/warmup/run", {
+                "phone_ids": selected_phone_ids,
+                "duration_minutes": warmup_duration,
+                "action": "browse video"
+            })
+            if result and result.get("success"):
+                st.success("Basic warmup started!")
+            else:
+                st.error(f"Failed: {result}")
+    
+    with col3:
+        if st.button("🔄 Refresh", use_container_width=True, key="refresh_warmup"):
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # ===== WARMUP LOGS =====
+    st.write("**📊 Recent Warmup Tasks:**")
+    
+    # Query recent warmup tasks from GeeLark
+    warmup_tasks = api_post("/geelark/tasks/query", {
+        "task_type": 2,  # AI warmup type
+        "page_size": 20,
+        "page": 1
+    })
+    
+    if warmup_tasks and warmup_tasks.get("items"):
+        tasks = warmup_tasks["items"]
+        
+        status_map = {0: "⏳ Pending", 1: "🔄 Running", 2: "✅ Success", 3: "❌ Failed", 4: "⏹️ Stopped"}
+        
+        df = pd.DataFrame([{
+            "Phone": t.get("serialName", "N/A"),
+            "Status": status_map.get(t.get("status"), "Unknown"),
+            "Duration": f"{t.get('costSeconds', 0)}s",
+            "Created": t.get("createTime", "")[:16] if t.get("createTime") else "-"
+        } for t in tasks[:10]])
+        
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Summary stats
+        success_count = sum(1 for t in tasks if t.get("status") == 2)
+        running_count = sum(1 for t in tasks if t.get("status") == 1)
+        st.caption(f"📈 Last 20 tasks: {success_count} success, {running_count} running")
+    else:
+        st.info("No recent warmup tasks found")
 
 
 # ===========================

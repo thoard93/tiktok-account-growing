@@ -942,6 +942,54 @@ async def run_warmup_on_phone(
         }
 
 
+@router.post("/geelark/warmup/enhanced", tags=["GeeLark"])
+async def run_enhanced_warmup(
+    data: dict,
+    geelark: GeeLarkClient = Depends(get_geelark_client)
+):
+    """
+    Run enhanced warmup with template chaining on multiple phones.
+    Chains: AI Warmup → AI Comments → Random Like
+    
+    Args:
+        phone_ids: List of GeeLark phone IDs
+        duration_minutes: Warmup duration (default 30)
+        keywords: List of search keywords for targeted browsing
+        enable_comments: Enable AI comment generation (default True)
+        enable_likes: Enable random likes (default True)
+        like_probability: Percentage chance to like videos (default 30)
+    """
+    phone_ids = data.get("phone_ids", [])
+    duration = data.get("duration_minutes", 30)
+    keywords = data.get("keywords", ["teamwork", "motivation"])
+    enable_comments = data.get("enable_comments", True)
+    enable_likes = data.get("enable_likes", True)
+    like_probability = data.get("like_probability", 30)
+    
+    if not phone_ids:
+        raise HTTPException(status_code=400, detail="phone_ids is required")
+    
+    # Run enhanced warmup with template chaining
+    result = geelark.run_enhanced_warmup(
+        phone_ids=phone_ids,
+        duration_minutes=duration,
+        keywords=keywords,
+        enable_comments=enable_comments,
+        enable_likes=enable_likes,
+        like_probability=like_probability
+    )
+    
+    return {
+        "success": result.get("success", True),
+        "message": f"Enhanced warmup started on {len(phone_ids)} phone(s)",
+        "main_task_id": result.get("warmup_task_id"),
+        "chained_tasks": {
+            "comments": result.get("comments_task_id"),
+            "likes": result.get("likes_task_id")
+        }
+    }
+
+
 # ===========================
 # Video Generation Routes
 # ===========================
