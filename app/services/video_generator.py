@@ -81,8 +81,8 @@ CAPTIONS = [
     "Teamwork makes everything better 🙌"
 ]
 
-# Hashtags (standard set)
-HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedreamwork #fyp #viral #motivation #squadgoals"
+# Hashtags (max 5, teamwork focused only)
+HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo"
 
 # Video motion prompts
 VIDEO_MOTION_PROMPTS = [
@@ -143,14 +143,14 @@ class VideoGenerator:
         try:
             system_prompt = """You are a creative prompt engineer for AI image generation. Generate short, vivid image prompts for POV leisurely stroll videos in beautiful scenic locations.
 
-Requirements:
-- POV (first person) perspective looking OUT at scenery (NOT looking down at feet/legs)
-- NO feet, legs, or shoes visible - focus on the landscape/horizon
-- Beautiful scenic stroll locations: city parks, beaches, forests, downtown streets, mountain trails, gardens, riverside paths
+CRITICAL REQUIREMENTS:
+- POV (first person) perspective looking OUT at the horizon/landscape
+- ABSOLUTELY NO feet, legs, shoes, or lower body - ONLY show distant scenery and environment
+- Camera angle should look FORWARD at the path/horizon, never down
+- Beautiful scenic locations: city parks, beaches, forests, downtown streets, mountain trails, gardens, riverside paths
 - ALWAYS include golden hour lighting, soft warm sunlight, or beautiful natural lighting
-- Emphasize peaceful, calming atmosphere and rich colors
-- 9:16 vertical format optimized
-- Short but descriptive (1-2 sentences)
+- Rich vibrant colors and peaceful atmosphere
+- 9:16 vertical format
 
 Just output the prompt, nothing else."""
             
@@ -182,8 +182,8 @@ Just output the prompt, nothing else."""
             result = response.json()
             prompt = result.get("content", [{}])[0].get("text", "").strip()
             
-            # Append quality modifiers
-            prompt += ", 9:16 vertical format, cinematic quality, vibrant colors, motivational aesthetic"
+            # Append quality modifiers - emphasize NO FEET
+            prompt += ", 9:16 vertical format, cinematic quality, vibrant colors, NO feet or legs visible, looking forward at horizon"
             
             logger.info(f"Claude generated prompt: {prompt[:100]}...")
             return prompt
@@ -210,7 +210,7 @@ Just output the prompt, nothing else."""
         input_video_path: str,
         output_video_path: str,
         text: str,
-        font_size: int = 36,
+        font_size: int = 24,
         font_color: str = "white",
         border_color: str = "black",
         border_width: int = 3
@@ -516,7 +516,8 @@ Just output the prompt, nothing else."""
             overlay_success = self.add_text_overlay(
                 str(raw_video_path),
                 str(overlay_video_path),
-                final_text
+                final_text,
+                font_size=24  # Smaller, less intrusive text
             )
             
             if overlay_success:

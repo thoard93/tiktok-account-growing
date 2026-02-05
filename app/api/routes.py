@@ -1008,11 +1008,13 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
     try:
         with _video_jobs_lock:
             _video_jobs[job_id]["status"] = "running"
-            _video_jobs[job_id]["message"] = "Generating videos..."
+            _video_jobs[job_id]["message"] = f"Generating {count} video(s)..."
         
+        logger.info(f"[Job {job_id}] Starting generation of {count} video(s), style={style}")
         generator = get_video_generator()
         
         if count == 1:
+            logger.info(f"[Job {job_id}] Single video mode")
             result = generator.generate_teamwork_video(
                 style_hint=style,
                 text_overlay=text_overlay,
@@ -1020,15 +1022,27 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
             )
             results = [result]
         else:
+            logger.info(f"[Job {job_id}] Batch mode: generating {count} videos with 10s delay between each")
             results = generator.generate_batch(
                 count=count,
                 style_hints=[style] if style else None,
                 skip_overlay=skip_overlay
             )
         
+        # Log results summary
+        success_count = sum(1 for r in results if r.success)
+        fail_count = sum(1 for r in results if not r.success)
+        logger.info(f"[Job {job_id}] Generation complete: {success_count} success, {fail_count} failed out of {count} requested")
+        
+        for i, r in enumerate(results):
+            if r.success:
+                logger.info(f"[Job {job_id}] Video {i+1}: SUCCESS - {r.video_path}")
+            else:
+                logger.error(f"[Job {job_id}] Video {i+1}: FAILED - {r.error}")
+        
         with _video_jobs_lock:
             _video_jobs[job_id]["status"] = "completed"
-            _video_jobs[job_id]["message"] = "Video generation complete!"
+            _video_jobs[job_id]["message"] = f"Complete: {success_count}/{count} videos generated"
             _video_jobs[job_id]["results"] = [
                 {
                     "success": r.success,
@@ -1040,8 +1054,8 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
                 for r in results
             ]
             _video_jobs[job_id]["total_cost_usd"] = sum(r.cost_usd for r in results)
-            _video_jobs[job_id]["successful"] = sum(1 for r in results if r.success)
-            _video_jobs[job_id]["failed"] = sum(1 for r in results if not r.success)
+            _video_jobs[job_id]["successful"] = success_count
+            _video_jobs[job_id]["failed"] = fail_count
             
     except Exception as e:
         logger.error(f"Video generation job {job_id} failed: {e}")
