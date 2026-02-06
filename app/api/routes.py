@@ -1535,6 +1535,26 @@ async def get_posting_job_status(job_id: str):
         return _posting_jobs[job_id].copy()
 
 
+@router.get("/videos/jobs")
+async def list_all_jobs():
+    """List all posting jobs for dashboard display."""
+    with _posting_jobs_lock:
+        jobs = []
+        for job_id, job_data in _posting_jobs.items():
+            jobs.append({
+                "job_id": job_id,
+                "status": job_data.get("status"),
+                "message": job_data.get("message"),
+                "created_at": job_data.get("created_at"),
+                "videos": job_data.get("videos", []),
+                "phone_ids": job_data.get("phone_ids", []),
+                "successful": job_data.get("successful", 0),
+                "failed": job_data.get("failed", 0)
+            })
+        # Sort by created_at descending
+        jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return {"jobs": jobs[:20]}  # Return last 20 jobs
+
 
 # ===========================
 # Schedule Config Routes

@@ -941,6 +941,33 @@ elif page == "🎬 Videos":
                             st.rerun()
         else:
             st.info("No legacy videos uploaded.")
+        
+        # ===== VIDEO ACTIVITY LOG =====
+        st.markdown("---")
+        st.subheader("📊 Video Activity Log")
+        st.caption("Recent video posting jobs - shows scheduled and manual posting attempts")
+        
+        jobs_data = api_get("/videos/jobs")
+        if jobs_data and jobs_data.get("jobs"):
+            for job in jobs_data["jobs"]:
+                status_icon = "✅" if job["status"] == "completed" else "🔄" if job["status"] == "running" else "❌" if job["status"] == "failed" else "⏳"
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                    with col1:
+                        st.write(f"{status_icon} **{job['job_id']}**")
+                        st.caption(f"Created: {job.get('created_at', 'N/A')[:16] if job.get('created_at') else 'N/A'}")
+                    with col2:
+                        st.write(f"📹 {len(job.get('videos', []))} videos")
+                        st.write(f"📱 {len(job.get('phone_ids', []))} phones")
+                    with col3:
+                        st.write(f"✅ {job.get('successful', 0)} success")
+                        st.write(f"❌ {job.get('failed', 0)} failed")
+                    with col4:
+                        st.write(f"**{job['status'].upper()}**")
+                        st.caption(job.get('message', '')[:40])
+                st.markdown("---")
+        else:
+            st.info("No posting jobs recorded yet. Jobs appear here when you post videos manually or via scheduler.")
     
     # ===== POST TO TIKTOK TAB =====
     with tab3:
@@ -1167,7 +1194,7 @@ elif page == "🎬 Videos":
                 "Posts per Phone per Day",
                 min_value=1,
                 max_value=5,
-                value=3,
+                value=saved_config.get("posts_per_phone", 3),
                 help="How many times each phone should post daily"
             )
         with col2:
@@ -1287,7 +1314,30 @@ elif page == "🎬 Videos":
                     else:
                         st.error("Failed to save config")
             else:
-                st.success("✅ Scheduling is **ENABLED**")
+                # Already enabled - show Update button if settings have changed
+                saved_phone_set = set(saved_config.get("phone_ids", []))
+                current_phone_set = set(selected_phone_ids)
+                config_changed = (saved_phone_set != current_phone_set or 
+                                  saved_config.get("posts_per_phone") != posts_per_phone or
+                                  saved_config.get("enable_warmup") != st.session_state.get("enable_warmup", True) or
+                                  saved_config.get("auto_delete") != st.session_state.get("auto_delete_posted", True))
+                
+                if config_changed:
+                    if st.button("💾 Save Changes", use_container_width=True, type="primary"):
+                        result = api_post("/schedule/config", {
+                            "enabled": True,
+                            "phone_ids": selected_phone_ids,
+                            "posts_per_phone": posts_per_phone,
+                            "enable_warmup": st.session_state.get("enable_warmup", True),
+                            "auto_delete": st.session_state.get("auto_delete_posted", True)
+                        })
+                        if result and result.get("success"):
+                            st.success("✅ Schedule updated!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to save changes")
+                else:
+                    st.success("✅ Scheduling is **ENABLED**")
         
         with col2:
             if scheduling_enabled:
