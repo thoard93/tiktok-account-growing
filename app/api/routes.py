@@ -1301,7 +1301,8 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
     from pathlib import Path
     from app.services.video_generator import get_video_generator
     from app.services.geelark_client import GeeLarkClient
-    from app.core.config import settings
+    from app.config import get_settings
+    settings = get_settings()
     
     logger.info(f"[PostJob {job_id}] Starting posting job for {len(video_filenames)} videos to {len(phone_ids)} phones")
     
