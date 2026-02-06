@@ -1312,11 +1312,19 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
         
         # Create fresh GeeLark client for background thread
         creds = settings.get_geelark_credentials()
-        geelark = GeeLarkClient(
-            app_id=creds["app_id"],
-            app_secret=creds["app_secret"],
-            base_url=settings.geelark_api_base_url
-        )
+        if creds.get("method") == "TOKEN":
+            geelark = GeeLarkClient(
+                base_url=settings.geelark_api_base_url,
+                auth_method="TOKEN",
+                app_token=creds.get("token")
+            )
+        else:
+            geelark = GeeLarkClient(
+                base_url=settings.geelark_api_base_url,
+                auth_method="KEY",
+                app_id=creds.get("app_id"),
+                api_key=creds.get("api_key")
+            )
         
         generator = get_video_generator()
         results = []
