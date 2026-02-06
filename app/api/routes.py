@@ -1386,18 +1386,25 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
             pairs = list(zip(video_filenames, phone_ids))
             logger.info(f"[PostJob {job_id}] One-to-one distribution: {len(pairs)} video-phone pairs")
         
+        logger.info(f"[PostJob {job_id}] Processing {len(pairs)} video-phone pairs")
         for video_filename, phone_id in pairs:
+            logger.info(f"[PostJob {job_id}] Processing: {video_filename} → {phone_id[:8]}...")
             video_path = generator.output_dir / video_filename
+            logger.info(f"[PostJob {job_id}] Video path: {video_path}, exists={video_path.exists()}")
             
             if not video_path.exists():
+                logger.error(f"[PostJob {job_id}] Video file not found: {video_path}")
                 results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": "Video file not found"})
                 continue
             
             # Get upload URL
+            logger.info(f"[PostJob {job_id}] Getting upload URL for {video_filename}...")
             upload_response = geelark.get_upload_url(video_filename)
             if not upload_response.success:
+                logger.error(f"[PostJob {job_id}] Upload URL failed: {upload_response.message}")
                 results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"Upload URL failed: {upload_response.message}"})
                 continue
+            logger.info(f"[PostJob {job_id}] Got upload URL: {upload_response.data}")
             
             upload_url = upload_response.data.get("uploadUrl") or upload_response.data.get("url")
             resource_url = upload_response.data.get("resourceUrl") or upload_response.data.get("accessUrl")
@@ -1418,6 +1425,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
                 continue
             
             # Transfer to this specific phone
+            logger.info(f"[PostJob {job_id}] Transferring video to phone {phone_id[:8]}...")
             transfer_response = geelark.upload_file_to_phone(
                 phone_id=phone_id,
                 resource_url=resource_url,
@@ -1425,16 +1433,20 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
             )
             
             if not transfer_response.success:
+                logger.error(f"[PostJob {job_id}] Transfer failed: {transfer_response.message}")
                 results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"Transfer failed: {transfer_response.message}"})
                 continue
+            logger.info(f"[PostJob {job_id}] Transfer successful")
             
             time.sleep(2)
             
+            logger.info(f"[PostJob {job_id}] Creating RPA task to post video...")
             post_response = geelark.post_tiktok_video(
                 phone_id=phone_id,
                 video_url=resource_url,
                 caption=full_caption
             )
+            logger.info(f"[PostJob {job_id}] RPA response: success={post_response.success}, data={post_response.data}, message={post_response.message}")
             
             if post_response.success:
                 task_id = post_response.data.get("taskId") or (post_response.data.get("taskIds") or [None])[0] if post_response.data else None
