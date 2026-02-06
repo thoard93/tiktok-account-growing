@@ -409,91 +409,178 @@ elif page == "✨ Magic Setup":
     
     st.markdown("---")
     
-    # Simple form - no complex session state
-    with st.form("magic_setup_form"):
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            proxy_string = st.text_input(
-                "🌐 Proxy String",
-                placeholder="socks5://user:pass@1.2.3.4:1337  or  host:port:user:pass",
-                help="Supports multiple formats: protocol://user:pass@host:port or host:port:user:pass"
-            )
-        
-        with col2:
-            name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
-        
-        # Submit button inside form - guaranteed to work
-        submitted = st.form_submit_button("🚀 Launch Magic Setup", type="primary", use_container_width=True)
-        
-        if submitted:
-            if not proxy_string:
-                st.warning("⚠️ Please enter a proxy string")
-            else:
-                st.info("🔄 Starting Magic Setup... (this may take 2-5 minutes)")
-                
-                # Start async task - use long timeout for cold starts
-                result = api_post_long("/accounts/full-setup-async", {
-                    "proxy_string": proxy_string,
-                    "name_prefix": name_prefix or "",
-                    "max_retries": 5
-                })
-                
-                if result and result.get("task_id"):
-                    task_id = result["task_id"]
-                    st.success(f"✅ Task started! ID: `{task_id}`")
-                    st.markdown(f"👉 **[Check progress in Logs tab](#)** or wait here...")
-                    
-                    # Poll for completion
-                    import time
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    for i in range(120):  # Max 10 minutes (120 * 5 seconds)
-                        time.sleep(5)
-                        task_status = api_get(f"/tasks/{task_id}")
-                        
-                        if task_status:
-                            # Robust progress parsing - handle various formats
-                            progress_val = task_status.get("progress", 0)
-                            try:
-                                progress = int(progress_val) if progress_val is not None else 0
-                            except (ValueError, TypeError):
-                                progress = 0  # Default if not a valid number
-                            
-                            current_step = task_status.get("current_step", "Working...")
-                            status = task_status.get("status", "running")
-                            
-                            progress_bar.progress(max(0, min(progress, 100)) / 100)
-                            status_text.markdown(f"**{status.upper()}**: {current_step}")
-                            
-                            if status == "complete":
-                                st.balloons()
-                                res = task_status.get("result", {})
-                                st.success(f"""
-                                🎉 **Account Created!**
-                                - Account ID: `{res.get('account_id')}`
-                                - Phone ID: `{res.get('phone_id')}`
-                                """)
-                                if res.get("credentials"):
-                                    creds = res["credentials"]
-                                    st.info(f"""
-                                    **Credentials**: `{creds.get('username')}` / `{creds.get('email')}` / `{creds.get('password')}`
-                                    """)
-                                break
-                            
-                            elif status == "failed":
-                                st.error(f"❌ Failed: {task_status.get('error')}")
-                                break
-                        else:
-                            status_text.warning("Waiting for task status...")
-                    else:
-                        st.warning("⏰ Task taking too long. Check Logs tab for status.")
-                
-                elif result:
-                    st.error(f"Error starting task: {result}")
+    setup_tab1, setup_tab2 = st.tabs(["🔧 Single Setup", "📦 Batch Setup"])
+    
+    with setup_tab1:
+        # Simple form - no complex session state
+        with st.form("magic_setup_form"):
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                proxy_string = st.text_input(
+                    "🌐 Proxy String",
+                    placeholder="socks5://user:pass@1.2.3.4:1337  or  host:port:user:pass",
+                    help="Supports multiple formats: protocol://user:pass@host:port or host:port:user:pass"
+                )
+            
+            with col2:
+                name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
+            
+            # Submit button inside form - guaranteed to work
+            submitted = st.form_submit_button("🚀 Launch Magic Setup", type="primary", use_container_width=True)
+            
+            if submitted:
+                if not proxy_string:
+                    st.warning("⚠️ Please enter a proxy string")
                 else:
-                    st.error("Failed to connect to API")
+                    st.info("🔄 Starting Magic Setup... (this may take 2-5 minutes)")
+                    
+                    # Start async task - use long timeout for cold starts
+                    result = api_post_long("/accounts/full-setup-async", {
+                        "proxy_string": proxy_string,
+                        "name_prefix": name_prefix or "",
+                        "max_retries": 5
+                    })
+                    
+                    if result and result.get("task_id"):
+                        task_id = result["task_id"]
+                        st.success(f"✅ Task started! ID: `{task_id}`")
+                        st.markdown(f"👉 **[Check progress in Logs tab](#)** or wait here...")
+                        
+                        # Poll for completion
+                        import time
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        for i in range(120):  # Max 10 minutes (120 * 5 seconds)
+                            time.sleep(5)
+                            task_status = api_get(f"/tasks/{task_id}")
+                            
+                            if task_status:
+                                # Robust progress parsing - handle various formats
+                                progress_val = task_status.get("progress", 0)
+                                try:
+                                    progress = int(progress_val) if progress_val is not None else 0
+                                except (ValueError, TypeError):
+                                    progress = 0  # Default if not a valid number
+                                
+                                current_step = task_status.get("current_step", "Working...")
+                                status = task_status.get("status", "running")
+                                
+                                progress_bar.progress(max(0, min(progress, 100)) / 100)
+                                status_text.markdown(f"**{status.upper()}**: {current_step}")
+                                
+                                if status == "complete":
+                                    st.balloons()
+                                    res = task_status.get("result", {})
+                                    st.success(f"""
+                                    🎉 **Account Created!**
+                                    - Account ID: `{res.get('account_id')}`
+                                    - Phone ID: `{res.get('phone_id')}`
+                                    """)
+                                    if res.get("credentials"):
+                                        creds = res["credentials"]
+                                        st.info(f"""
+                                        **Credentials**: `{creds.get('username')}` / `{creds.get('email')}` / `{creds.get('password')}`
+                                        """)
+                                    break
+                                
+                                elif status == "failed":
+                                    st.error(f"❌ Failed: {task_status.get('error')}")
+                                    break
+                            else:
+                                status_text.warning("Waiting for task status...")
+                        else:
+                            st.warning("⏰ Task taking too long. Check Logs tab for status.")
+                    
+                    elif result:
+                        st.error(f"Error starting task: {result}")
+                    else:
+                        st.error("Failed to connect to API")
+    
+    with setup_tab2:
+        st.markdown("**Paste multiple proxies** (one per line) to create accounts in bulk.")
+        st.markdown("✅ New accounts **auto-enroll** into the daily warmup & posting schedule.")
+        
+        with st.form("batch_setup_form"):
+            proxy_text = st.text_area(
+                "🌐 Proxies (one per line)",
+                height=200,
+                placeholder="socks5://user:pass@1.2.3.4:1337\nsocks5://user:pass@5.6.7.8:1337\nhost:port:user:pass",
+                help="Each line = one proxy = one TikTok account"
+            )
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                batch_prefix = st.text_input("Name Prefix", value="tiktok", key="batch_prefix")
+            with col2:
+                auto_enroll = st.checkbox("Auto-enroll in scheduler", value=True, help="Add new accounts to daily warmup & posting automatically")
+            
+            batch_submitted = st.form_submit_button("🚀 Launch Batch Setup", type="primary", use_container_width=True)
+            
+            if batch_submitted:
+                proxies = [p.strip() for p in proxy_text.strip().split("\n") if p.strip()]
+                
+                if not proxies:
+                    st.warning("⚠️ Please paste at least one proxy")
+                else:
+                    st.info(f"🔄 Starting batch setup for **{len(proxies)}** proxies...")
+                    
+                    result = api_post_long("/magic-setup/batch", {
+                        "proxies": proxies,
+                        "name_prefix": batch_prefix,
+                        "max_retries": 3,
+                        "auto_enroll": auto_enroll
+                    })
+                    
+                    if result and result.get("batch_id"):
+                        batch_id = result["batch_id"]
+                        st.success(f"✅ Batch started! ID: `{batch_id}`")
+                        
+                        import time
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        results_area = st.empty()
+                        
+                        for poll in range(360):  # 30 min max (360 * 5s)
+                            time.sleep(5)
+                            batch_status = api_get(f"/magic-setup/batch/{batch_id}")
+                            
+                            if batch_status and "error" not in batch_status:
+                                total = batch_status.get("total", 1)
+                                current = batch_status.get("current_proxy", 0)
+                                successful = batch_status.get("successful", 0)
+                                failed = batch_status.get("failed", 0)
+                                status = batch_status.get("status", "running")
+                                message = batch_status.get("message", "Processing...")
+                                
+                                progress_bar.progress(min((successful + failed) / total, 0.95))
+                                status_text.markdown(f"📊 **{message}** | ✅ {successful} | ❌ {failed}")
+                                
+                                # Show results so far
+                                results = batch_status.get("results", [])
+                                if results:
+                                    with results_area.container():
+                                        for r in results:
+                                            if r.get("success"):
+                                                st.write(f"✅ {r.get('proxy')} → Phone: `{r.get('phone_id', 'N/A')[:8]}...`")
+                                            else:
+                                                st.write(f"❌ {r.get('proxy')}: {r.get('error', 'Unknown')}")
+                                
+                                if status == "completed":
+                                    progress_bar.progress(1.0)
+                                    if successful > 0:
+                                        st.balloons()
+                                        st.success(f"🎉 Batch complete! {successful}/{total} accounts created & enrolled")
+                                    if failed > 0:
+                                        st.warning(f"⚠️ {failed} proxies failed")
+                                    break
+                            else:
+                                status_text.warning("Checking status...")
+                        else:
+                            st.warning("⏰ Batch still running. Check Render logs for progress.")
+                    else:
+                        st.error("Failed to start batch setup")
     
     st.markdown("---")
     st.caption("💡 Tip: Use static residential proxies for best results. Each proxy should be unique.")

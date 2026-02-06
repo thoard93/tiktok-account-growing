@@ -517,7 +517,7 @@ Just output the prompt, nothing else."""
                 str(raw_video_path),
                 str(overlay_video_path),
                 final_text,
-                font_size=24  # Smaller, less intrusive text
+                font_size=18  # Smaller, subtle text overlay
             )
             
             if overlay_success:

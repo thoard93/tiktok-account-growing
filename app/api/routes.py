@@ -5,6 +5,8 @@ FastAPI endpoints for account management, automation, and GeeLark integration.
 """
 
 import os
+import uuid
+import threading
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
@@ -499,6 +501,190 @@ def run_magic_setup_background(
     finally:
         # Always close the session
         db.close()
+
+
+# ===========================
+# Batch Proxy Onboarding
+# ===========================
+
+# In-memory store for batch setup jobs
+_batch_setup_jobs = {}
+_batch_setup_lock = threading.Lock()
+
+
+def _auto_enroll_phone(phone_id: str):
+    """Auto-add a phone ID to the ScheduleConfig for daily warmup/posting."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        config = db.query(ScheduleConfig).filter(ScheduleConfig.key == "main").first()
+        if config:
+            phone_ids = config.phone_ids or []
+            if phone_id not in phone_ids:
+                phone_ids.append(phone_id)
+                config.phone_ids = phone_ids
+                db.commit()
+                logger.info(f"[AutoEnroll] Added phone {phone_id[:8]}... to schedule (total: {len(phone_ids)} phones)")
+            else:
+                logger.info(f"[AutoEnroll] Phone {phone_id[:8]}... already in schedule")
+        else:
+            # Create initial config with this phone
+            config = ScheduleConfig(
+                key="main",
+                enabled=True,
+                phone_ids=[phone_id],
+                enable_warmup=True,
+                auto_delete=True
+            )
+            db.add(config)
+            db.commit()
+            logger.info(f"[AutoEnroll] Created schedule config with phone {phone_id[:8]}...")
+    except Exception as e:
+        logger.error(f"[AutoEnroll] Failed to enroll phone {phone_id}: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _run_batch_setup(batch_id: str, proxies: list, name_prefix: str, max_retries: int, auto_enroll: bool):
+    """Background worker: process multiple proxies sequentially."""
+    from app.services.account_manager import AccountManager
+    from app.database import SessionLocal
+
+    logger.info(f"[BatchSetup {batch_id}] Starting batch for {len(proxies)} proxies")
+
+    with _batch_setup_lock:
+        _batch_setup_jobs[batch_id]["status"] = "running"
+
+    for i, proxy_string in enumerate(proxies):
+        proxy_label = proxy_string[:30] + "..." if len(proxy_string) > 30 else proxy_string
+
+        with _batch_setup_lock:
+            _batch_setup_jobs[batch_id]["current_proxy"] = i + 1
+            _batch_setup_jobs[batch_id]["message"] = f"Processing proxy {i+1}/{len(proxies)}: {proxy_label}"
+
+        db = SessionLocal()
+        geelark = get_geelark_client()
+
+        try:
+            manager = AccountManager(db, geelark)
+
+            result = manager.full_automation_setup(
+                proxy_string=proxy_string,
+                name_prefix=name_prefix,
+                max_username_retries=max_retries
+            )
+
+            if result.get("success"):
+                phone_id = result.get("phone_id") or result.get("env_id", "")
+                with _batch_setup_lock:
+                    _batch_setup_jobs[batch_id]["successful"] += 1
+                    _batch_setup_jobs[batch_id]["results"].append({
+                        "proxy": proxy_label,
+                        "success": True,
+                        "phone_id": phone_id,
+                        "username": result.get("username", ""),
+                    })
+                logger.info(f"[BatchSetup {batch_id}] Proxy {i+1}: SUCCESS - phone {phone_id[:8] if phone_id else 'N/A'}...")
+
+                # Auto-enroll into scheduler
+                if auto_enroll and phone_id:
+                    _auto_enroll_phone(phone_id)
+            else:
+                with _batch_setup_lock:
+                    _batch_setup_jobs[batch_id]["failed"] += 1
+                    _batch_setup_jobs[batch_id]["results"].append({
+                        "proxy": proxy_label,
+                        "success": False,
+                        "error": result.get("error", "Unknown error"),
+                    })
+                logger.warning(f"[BatchSetup {batch_id}] Proxy {i+1}: FAILED - {result.get('error', 'Unknown')}")
+
+        except Exception as e:
+            with _batch_setup_lock:
+                _batch_setup_jobs[batch_id]["failed"] += 1
+                _batch_setup_jobs[batch_id]["results"].append({
+                    "proxy": proxy_label,
+                    "success": False,
+                    "error": str(e),
+                })
+            logger.error(f"[BatchSetup {batch_id}] Proxy {i+1}: EXCEPTION - {e}")
+
+        finally:
+            db.close()
+
+        # Brief pause between setups to avoid rate limiting
+        if i < len(proxies) - 1:
+            import time
+            time.sleep(5)
+
+    with _batch_setup_lock:
+        _batch_setup_jobs[batch_id]["status"] = "completed"
+        successful = _batch_setup_jobs[batch_id]["successful"]
+        failed = _batch_setup_jobs[batch_id]["failed"]
+        _batch_setup_jobs[batch_id]["message"] = f"Complete: {successful} success, {failed} failed out of {len(proxies)}"
+
+    logger.info(f"[BatchSetup {batch_id}] Complete: {successful} success, {failed} failed")
+
+
+@router.post("/magic-setup/batch", tags=["Accounts"])
+async def batch_magic_setup(data: dict):
+    """
+    🚀 Batch proxy onboarding - paste multiple proxies, create accounts for all.
+    
+    Processes proxies sequentially in background. Returns batch_id for polling.
+    Auto-enrolls successful accounts into the scheduler for daily warmup/posting.
+    
+    Body:
+        proxies: list of proxy strings
+        name_prefix: optional name prefix (default "tiktok")
+        max_retries: optional retry count (default 3)
+        auto_enroll: optional, auto-add to scheduler (default true)
+    """
+    proxies = data.get("proxies", [])
+    name_prefix = data.get("name_prefix", "tiktok")
+    max_retries = data.get("max_retries", 3)
+    auto_enroll = data.get("auto_enroll", True)
+
+    if not proxies:
+        return {"success": False, "error": "No proxies provided"}
+
+    batch_id = str(uuid.uuid4())[:8]
+    _batch_setup_jobs[batch_id] = {
+        "status": "pending",
+        "message": "Initializing batch setup...",
+        "created_at": datetime.now().isoformat(),
+        "total": len(proxies),
+        "current_proxy": 0,
+        "successful": 0,
+        "failed": 0,
+        "results": [],
+        "auto_enroll": auto_enroll,
+    }
+
+    task_thread = threading.Thread(
+        target=_run_batch_setup,
+        args=(batch_id, proxies, name_prefix, max_retries, auto_enroll),
+        daemon=True
+    )
+    task_thread.start()
+    logger.info(f"[BatchSetup {batch_id}] Background thread started for {len(proxies)} proxies")
+
+    return {
+        "success": True,
+        "batch_id": batch_id,
+        "message": f"Batch setup started for {len(proxies)} proxies",
+        "poll_url": f"/api/magic-setup/batch/{batch_id}"
+    }
+
+
+@router.get("/magic-setup/batch/{batch_id}", tags=["Accounts"])
+async def get_batch_setup_status(batch_id: str):
+    """Get status of a batch setup job."""
+    with _batch_setup_lock:
+        if batch_id not in _batch_setup_jobs:
+            return {"error": "Batch job not found"}
+        return dict(_batch_setup_jobs[batch_id])
 
 
 @router.get("/tasks/{task_id}", tags=["Tasks"])
