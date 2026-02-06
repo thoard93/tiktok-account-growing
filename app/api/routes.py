@@ -9,7 +9,7 @@ import uuid
 import threading
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from loguru import logger
 
@@ -401,8 +401,7 @@ async def full_automation_setup(
 
 @router.post("/accounts/full-setup-async", tags=["Accounts"])
 async def full_automation_setup_async(
-    data: FullSetupRequest,
-    background_tasks: BackgroundTasks
+    data: FullSetupRequest
 ):
     """
     🚀 ASYNC Zero-touch automation - Returns immediately with task_id.
@@ -424,14 +423,19 @@ async def full_automation_setup_async(
         "name_prefix": data.name_prefix
     })
     
-    # Run in background - don't pass db/geelark, create fresh inside
-    background_tasks.add_task(
-        run_magic_setup_background,
-        task_id=task_id,
-        proxy_string=data.proxy_string,
-        name_prefix=data.name_prefix,
-        max_retries=data.max_retries
+    # Run in background thread (reliable on Gunicorn, unlike BackgroundTasks)
+    task_thread = threading.Thread(
+        target=run_magic_setup_background,
+        kwargs={
+            "task_id": task_id,
+            "proxy_string": data.proxy_string,
+            "name_prefix": data.name_prefix,
+            "max_retries": data.max_retries
+        },
+        daemon=True
     )
+    task_thread.start()
+    logger.info(f"[MagicSetup {task_id}] Background thread started")
     
     # Return immediately with task_id
     return {
@@ -1181,8 +1185,6 @@ async def run_enhanced_warmup(
 # ===========================
 
 # Simple in-memory job tracker for video generation
-import threading
-import uuid
 _video_jobs = {}
 _video_jobs_lock = threading.Lock()
 
@@ -1251,10 +1253,7 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
 
 
 @router.post("/videos/generate")
-async def generate_teamwork_video(
-    data: dict,
-    background_tasks: BackgroundTasks
-):
+async def generate_teamwork_video(data: dict):
     """
     Start video generation job (returns immediately).
     

@@ -329,7 +329,7 @@ page = st.sidebar.radio(
 
 # Version footer - update on each deploy
 st.sidebar.markdown("---")
-st.sidebar.caption(f"v0.7.0 | API: {API_BASE_URL[:40]}...")
+st.sidebar.caption(f"v1.9.0 | API: {API_BASE_URL[:40]}...")
 
 
 # ===========================
@@ -1006,28 +1006,7 @@ elif page == "🎬 Videos":
         else:
             st.info("No videos generated yet. Use the 'AI Generate' tab to create teamwork videos!")
         
-        # Also show old video library
-        st.subheader("📁 Uploaded Videos (Legacy)")
-        old_videos = api_get("/videos")
-        if old_videos and old_videos.get("items"):
-            for v in old_videos["items"]:
-                col1, col2, col3, col4, col5 = st.columns([1, 3, 1, 1, 1])
-                with col1:
-                    st.write(f"**#{v['id']}**")
-                with col2:
-                    st.write(v["filename"])
-                with col3:
-                    st.write("✅" if v["is_posted"] else "❌")
-                with col4:
-                    st.write(v.get("account_id") or "-")
-                with col5:
-                    if st.button("🗑️", key=f"del_legacy_{v['id']}"):
-                        result = api_delete(f"/videos/legacy/{v['id']}")
-                        if result:
-                            st.success("Deleted!")
-                            st.rerun()
-        else:
-            st.info("No legacy videos uploaded.")
+            st.info("No legacy videos. All new videos appear in the Generated Videos list above.")
         
         # ===== VIDEO ACTIVITY LOG =====
         st.markdown("---")
@@ -1347,7 +1326,7 @@ elif page == "🎬 Videos":
                 # Get available videos
                 videos_resp = api_get("/videos/list")
                 if videos_resp and videos_resp.get("videos"):
-                    video_filenames = videos_resp["videos"][:3]  # Post up to 3
+                    video_filenames = [v["filename"] for v in videos_resp["videos"][:3]]  # Post up to 3
                     phone_ids = st.session_state.scheduled_phones
                     
                     with st.spinner("Starting posting job..."):
@@ -1692,7 +1671,7 @@ elif page == "📊 Logs":
 elif page == "⚙️ GeeLark":
     st.title("GeeLark Direct Control")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📱 Cloud Phones", "📋 Task History", "🔧 Task Management", "📅 Scheduled Warmups"])
+    tab1, tab2, tab3 = st.tabs(["📱 Cloud Phones", "📋 Task History", "🔧 Task Management"])
     
     with tab1:
         st.subheader("Cloud Phones")
@@ -1911,116 +1890,8 @@ elif page == "⚙️ GeeLark":
                     result = api_post("/geelark/tasks/retry", {"task_ids": ids})
                     if result:
                         st.success(f"Retried: {result.get('successAmount', 0)}")
-    
-    with tab4:
-        st.subheader("📅 Scheduled Daily Warmups")
-        st.caption("Set up automatic warmups that run every day at the specified time.")
-        
-        # Initialize schedules in session state if not exists
-        if "warmup_schedules" not in st.session_state:
-            st.session_state.warmup_schedules = []
-        
-        # Fetch phones for schedule creation
-        phones = api_get("/geelark/phones")
-        
-        if phones and phones.get("items"):
-            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
-            
-            st.markdown("### Create New Schedule")
-            
-            # Schedule creation form
-            with st.form("create_schedule"):
-                schedule_phones = st.multiselect(
-                    "Select Phones for Schedule",
-                    options=list(phone_options.keys()),
-                    help="These phones will run warmup daily"
-                )
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    schedule_time = st.time_input("Daily Run Time", value=None)
-                with col2:
-                    schedule_duration = st.number_input("Duration (min)", min_value=15, max_value=120, value=30)
-                with col3:
-                    schedule_mode = st.selectbox(
-                        "Warmup Mode",
-                        options=["🎯 Teamwork Trend", "📱 General FYP"]
-                    )
-                
-                submitted = st.form_submit_button("➕ Create Schedule", use_container_width=True)
-                
-                if submitted:
-                    if schedule_phones and schedule_time:
-                        new_schedule = {
-                            "id": len(st.session_state.warmup_schedules) + 1,
-                            "phones": schedule_phones,
-                            "phone_ids": [phone_options[p] for p in schedule_phones],
-                            "time": schedule_time.strftime("%H:%M"),
-                            "duration": schedule_duration,
-                            "mode": schedule_mode,
-                            "enabled": True
-                        }
-                        st.session_state.warmup_schedules.append(new_schedule)
-                        
-                        # Also save to API for persistence
-                        api_post("/warmup/schedules", new_schedule)
-                        
-                        st.success(f"✅ Schedule created! Daily at {schedule_time.strftime('%I:%M %p')}")
-                        st.rerun()
-                    else:
-                        st.warning("Please select phones and a time!")
-            
-            # Display existing schedules
-            if st.session_state.warmup_schedules:
-                st.markdown("### Active Schedules")
-                
-                for i, schedule in enumerate(st.session_state.warmup_schedules):
-                    with st.container():
-                        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-                        
-                        with col1:
-                            status = "🟢" if schedule.get("enabled", True) else "🔴"
-                            st.write(f"{status} **{schedule['time']}** - {len(schedule['phones'])} phone(s)")
-                            st.caption(f"{schedule['mode']} | {schedule['duration']}min | {', '.join(schedule['phones'][:2])}{'...' if len(schedule['phones']) > 2 else ''}")
-                        
-                        with col2:
-                            if st.button("▶️", key=f"run_{i}", help="Run now"):
-                                # Trigger warmup immediately
-                                for phone_name in schedule['phones']:
-                                    phone_id = phone_options.get(phone_name)
-                                    if phone_id:
-                                        action = "search video" if "Teamwork" in schedule['mode'] else "browse video"
-                                        keywords = ["teamwork trend", "teamwork challenge"] if "Teamwork" in schedule['mode'] else None
-                                        api_post("/geelark/warmup/run", {
-                                            "phone_id": phone_id,
-                                            "duration_minutes": schedule['duration'],
-                                            "action": action,
-                                            "keywords": keywords
-                                        })
-                                st.success("Warmup triggered!")
-                                st.rerun()
-                        
-                        with col3:
-                            toggle_label = "⏸️" if schedule.get("enabled", True) else "▶️"
-                            if st.button(toggle_label, key=f"toggle_{i}", help="Enable/Disable"):
-                                st.session_state.warmup_schedules[i]["enabled"] = not schedule.get("enabled", True)
-                                st.rerun()
-                        
-                        with col4:
-                            if st.button("🗑️", key=f"delete_{i}", help="Delete"):
-                                st.session_state.warmup_schedules.pop(i)
-                                st.rerun()
-                        
-                        st.markdown("---")
-            else:
-                st.info("No schedules yet. Create one above!")
-            
-            st.markdown("---")
-            st.caption("💡 **Note:** Schedules run automatically on the server. You can close your browser and they'll still execute. Check Task History for results.")
-        else:
-            st.info("No phones found. Add phones in GeeLark first!")
 
 
 # Footer
 st.sidebar.markdown("---")
-st.sidebar.caption("TikTok Automation v0.1.0")
+st.sidebar.caption("Built for automation 🤖")
