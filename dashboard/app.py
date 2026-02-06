@@ -1008,30 +1008,66 @@ elif page == "🎬 Videos":
             if st.button("📤 Start Posting", type="primary", use_container_width=True, disabled=not can_post):
                 phone_ids = [phone_options[p] for p in selected_phones]
                 
-                with st.spinner("Uploading videos and creating posting tasks..."):
+                # Start the posting job (returns immediately)
+                with st.spinner("Starting posting job..."):
                     result = api_post("/videos/post/batch", {
                         "videos": selected_videos,
                         "phone_ids": phone_ids,
                         "caption": custom_caption,
                         "hashtags": hashtags
                     })
+                
+                if result and result.get("job_id"):
+                    job_id = result["job_id"]
+                    st.info(f"🚀 Posting job started! Job ID: {job_id}")
                     
-                    if result:
-                        if result.get("successful", 0) > 0:
-                            st.success(f"✅ Created {result['successful']} posting task(s)!")
-                            
-                            with st.expander("View Details"):
-                                for r in result.get("results", []):
-                                    if r.get("success"):
-                                        st.write(f"✅ {r.get('video')} → {r.get('phone_id', '')[:8]}... (Task: {r.get('task_id', 'N/A')})")
-                                    else:
-                                        st.write(f"❌ {r.get('video')}: {r.get('error')}")
-                        else:
-                            st.error(f"❌ All tasks failed")
-                            for r in result.get("results", []):
-                                st.error(f"Error: {r.get('error')}")
+                    # Poll for job status
+                    status_placeholder = st.empty()
+                    progress_bar = st.progress(0)
+                    max_polls = 60  # 5 minutes max
+                    poll_count = 0
+                    
+                    while poll_count < max_polls:
+                        import time
+                        time.sleep(5)
+                        poll_count += 1
+                        progress_bar.progress(min(poll_count / max_polls, 0.9))
+                        
+                        try:
+                            job_status = api_get(f"/videos/post/job/{job_id}")
+                            if job_status:
+                                status = job_status.get("status", "unknown")
+                                message = job_status.get("message", "Processing...")
+                                status_placeholder.info(f"📊 Status: {message}")
+                                
+                                if status == "completed":
+                                    progress_bar.progress(1.0)
+                                    successful = job_status.get("successful", 0)
+                                    failed = job_status.get("failed", 0)
+                                    
+                                    if successful > 0:
+                                        st.success(f"✅ Posted {successful} video(s) successfully!")
+                                    if failed > 0:
+                                        st.warning(f"⚠️ {failed} posting(s) failed")
+                                    
+                                    with st.expander("View Details"):
+                                        for r in job_status.get("results", []):
+                                            if r.get("success"):
+                                                st.write(f"✅ {r.get('video')} → {r.get('phone_id', '')[:8]}...")
+                                            else:
+                                                st.write(f"❌ {r.get('video')}: {r.get('error')}")
+                                    break
+                                    
+                                elif status == "failed":
+                                    progress_bar.progress(1.0)
+                                    st.error(f"❌ Job failed: {message}")
+                                    break
+                        except Exception as e:
+                            status_placeholder.warning(f"Checking status... ({e})")
                     else:
-                        st.error("Failed to create posting tasks")
+                        st.warning("⏱️ Job still running. Check Task Logs tab for results.")
+                else:
+                    st.error("Failed to start posting job")
             
             if not can_post:
                 if not selected_videos:
@@ -1200,22 +1236,22 @@ elif page == "🎬 Videos":
                     video_filenames = videos_resp["videos"][:3]  # Post up to 3
                     phone_ids = st.session_state.scheduled_phones
                     
-                    with st.spinner(f"📤 Posting {len(video_filenames)} video(s) to {len(phone_ids)} phone(s)..."):
+                    with st.spinner("Starting posting job..."):
                         result = api_post("/videos/post/batch", {
                             "videos": video_filenames,
                             "phone_ids": phone_ids,
                             "caption": "",
-                            "hashtags": "#teamwork #teamworktrend #fyp #viral",
+                            "hashtags": "#teamwork #teamworktrend #teamworkchallenge",
                             "auto_start": True,
                             "auto_stop": True,
                             "auto_delete": st.session_state.get("auto_delete_posted", True)
-                        }, long_timeout=True)
-                        
-                        if result and result.get("success"):
-                            st.success(f"✅ Posted {result.get('successful', 0)}/{result.get('total', 0)} successfully!")
-                            st.info("Check the **Task Logs** tab to monitor progress")
-                        else:
-                            st.error(f"Posting failed: {result}")
+                        })
+                    
+                    if result and result.get("job_id"):
+                        st.success(f"🚀 Posting job started! Job ID: {result['job_id']}")
+                        st.info("📊 Check the **Task Logs** tab to monitor progress. Job runs in background.")
+                    else:
+                        st.error(f"Failed to start posting job: {result}")
                 else:
                     st.error("No videos available. Generate some first!")
             

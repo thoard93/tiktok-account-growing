@@ -1278,144 +1278,137 @@ async def upload_video_manual(
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/videos/post/batch")
-async def post_videos_to_tiktok(
-    data: dict,
-    db: Session = Depends(get_db),
-    geelark: GeeLarkClient = Depends(get_geelark_client)
-):
+# ===========================
+# Video Posting Jobs (Background)
+# ===========================
+
+_posting_jobs = {}
+_posting_jobs_lock = threading.Lock()
+
+
+def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, caption: str, 
+                     hashtags: str, auto_start: bool, auto_stop: bool, auto_delete: bool,
+                     distribute_mode: str = "one_to_one"):
     """
-    Upload videos to phones and create TikTok posting tasks.
-    Auto-starts phones before posting and stops them after.
+    Background worker for video posting.
     
-    Args:
-        videos: List of video filenames to post
-        phone_ids: List of phone IDs to post from
-        caption: Caption to use (or random if empty)
-        hashtags: Hashtags string
-        auto_start: Whether to auto-start phones (default True)
-        auto_stop: Whether to auto-stop phones after posting (default True)
-        auto_delete: Whether to delete videos after successful posting (default False)
+    distribute_mode:
+      - 'one_to_one': video[0]→phone[0], video[1]→phone[1] (default for manual)
+      - 'round_robin': video[i]→phone[i % len(phones)] (for scheduler, multiple posts per phone)
     """
     import time
     import requests as req
     from pathlib import Path
     from app.services.video_generator import get_video_generator
+    from app.services.geelark_client import GeeLarkClient
+    from app.core.config import settings
     
-    video_filenames = data.get("videos", [])
-    phone_ids = data.get("phone_ids", [])
-    caption = data.get("caption", "")
-    hashtags = data.get("hashtags", "#teamwork #fyp #viral")
-    auto_start = data.get("auto_start", True)
-    auto_stop = data.get("auto_stop", True)
-    auto_delete = data.get("auto_delete", False)
+    logger.info(f"[PostJob {job_id}] Starting posting job for {len(video_filenames)} videos to {len(phone_ids)} phones")
     
-    if not video_filenames or not phone_ids:
-        raise HTTPException(status_code=400, detail="Videos and phone_ids required")
-    
-    generator = get_video_generator()
-    results = []
-    phones_started = []
-    
-    # Step 0: Auto-start phones if needed
-    if auto_start:
-        logger.info(f"Auto-starting {len(phone_ids)} phone(s)...")
-        start_response = geelark.start_phones(phone_ids)
-        if start_response.success:
-            phones_started = phone_ids.copy()
-            logger.info(f"Phone start command sent, waiting for boot...")
+    try:
+        with _posting_jobs_lock:
+            _posting_jobs[job_id]["status"] = "running"
+            _posting_jobs[job_id]["message"] = "Initializing..."
+        
+        # Create fresh GeeLark client for background thread
+        creds = settings.get_geelark_credentials()
+        geelark = GeeLarkClient(
+            app_id=creds["app_id"],
+            app_secret=creds["app_secret"],
+            base_url=settings.geelark_api_base_url
+        )
+        
+        generator = get_video_generator()
+        results = []
+        phones_started = []
+        
+        # Step 0: Auto-start phones if needed
+        if auto_start:
+            with _posting_jobs_lock:
+                _posting_jobs[job_id]["message"] = f"Starting {len(phone_ids)} phone(s)..."
             
-            # Wait for phones to be running (status 0)
-            # Poll every 10 seconds for up to 2 minutes
-            max_wait = 120  # 2 minutes
-            wait_interval = 10
-            waited = 0
-            all_running = False
-            
-            while waited < max_wait and not all_running:
-                time.sleep(wait_interval)
-                waited += wait_interval
+            logger.info(f"[PostJob {job_id}] Auto-starting phones...")
+            start_response = geelark.start_phones(phone_ids)
+            if start_response.success:
+                phones_started = phone_ids.copy()
                 
-                status_response = geelark.get_phone_status(phone_ids)
-                if status_response.success and status_response.data:
-                    statuses = status_response.data
-                    # Check if list response
-                    if isinstance(statuses, list):
-                        all_running = all(
-                            s.get("status") == 0 or s.get("openStatus") == 0 
-                            for s in statuses
-                        )
-                    elif isinstance(statuses, dict):
-                        # Could be successDetails format
-                        details = statuses.get("successDetails", [])
-                        if details:
-                            all_running = all(d.get("status") == 0 for d in details)
+                # Wait for phones to boot
+                max_wait = 120
+                wait_interval = 10
+                waited = 0
+                all_running = False
                 
-                logger.info(f"Waited {waited}s for phones to boot, all_running={all_running}")
-            
-            if not all_running:
-                logger.warning("Not all phones confirmed running, proceeding anyway...")
+                while waited < max_wait and not all_running:
+                    time.sleep(wait_interval)
+                    waited += wait_interval
+                    
+                    with _posting_jobs_lock:
+                        _posting_jobs[job_id]["message"] = f"Waiting for phones to boot... ({waited}s)"
+                    
+                    status_response = geelark.get_phone_status(phone_ids)
+                    if status_response.success and status_response.data:
+                        statuses = status_response.data
+                        if isinstance(statuses, list):
+                            all_running = all(s.get("status") == 0 or s.get("openStatus") == 0 for s in statuses)
+                        elif isinstance(statuses, dict):
+                            details = statuses.get("successDetails", [])
+                            if details:
+                                all_running = all(d.get("status") == 0 for d in details)
+                    
+                    logger.info(f"[PostJob {job_id}] Waited {waited}s, all_running={all_running}")
+                
+                if not all_running:
+                    logger.warning(f"[PostJob {job_id}] Not all phones confirmed running, proceeding anyway")
+        
+        # Build full caption
+        full_caption = f"{caption} {hashtags}".strip() if caption else hashtags
+        
+        with _posting_jobs_lock:
+            _posting_jobs[job_id]["message"] = "Uploading and posting videos..."
+        
+        # Build video-phone pairs based on distribute_mode
+        if distribute_mode == "round_robin":
+            # Round-robin: each video goes to phone[i % len(phones)]
+            # Allows multiple videos per phone for scheduler use case
+            pairs = [(video_filenames[i], phone_ids[i % len(phone_ids)]) for i in range(len(video_filenames))]
+            logger.info(f"[PostJob {job_id}] Round-robin distribution: {len(pairs)} postings across {len(phone_ids)} phones")
         else:
-            logger.warning(f"Failed to start phones: {start_response.message}")
-    
-    # Build full caption
-    full_caption = f"{caption} {hashtags}".strip() if caption else hashtags
-    
-    for video_filename in video_filenames:
-        video_path = generator.output_dir / video_filename
+            # One-to-one: video[0]→phone[0], video[1]→phone[1] (default for manual)
+            pairs = list(zip(video_filenames, phone_ids))
+            logger.info(f"[PostJob {job_id}] One-to-one distribution: {len(pairs)} video-phone pairs")
         
-        if not video_path.exists():
-            results.append({
-                "video": video_filename,
-                "success": False,
-                "error": "Video file not found"
-            })
-            continue
-        
-        # Step 1: Get upload URL from GeeLark
-        upload_response = geelark.get_upload_url(video_filename)
-        
-        if not upload_response.success:
-            results.append({
-                "video": video_filename,
-                "success": False,
-                "error": f"Failed to get upload URL: {upload_response.message}"
-            })
-            continue
-        
-        upload_url = upload_response.data.get("uploadUrl") or upload_response.data.get("url")
-        resource_url = upload_response.data.get("resourceUrl") or upload_response.data.get("accessUrl")
-        
-        if not upload_url:
-            results.append({
-                "video": video_filename,
-                "success": False,
-                "error": "No upload URL returned"
-            })
-            continue
-        
-        # Step 2: Upload file to GeeLark OSS
-        try:
-            with open(video_path, "rb") as f:
-                upload_res = req.put(upload_url, data=f, timeout=120)
-                if upload_res.status_code not in [200, 201]:
-                    results.append({
-                        "video": video_filename,
-                        "success": False,
-                        "error": f"OSS upload failed: {upload_res.status_code}"
-                    })
-                    continue
-        except Exception as e:
-            results.append({
-                "video": video_filename,
-                "success": False,
-                "error": f"Upload error: {str(e)}"
-            })
-            continue
-        
-        # Step 3: For each phone, transfer file and create posting task
-        for phone_id in phone_ids:
-            # Transfer to phone
+        for video_filename, phone_id in pairs:
+            video_path = generator.output_dir / video_filename
+            
+            if not video_path.exists():
+                results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": "Video file not found"})
+                continue
+            
+            # Get upload URL
+            upload_response = geelark.get_upload_url(video_filename)
+            if not upload_response.success:
+                results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"Upload URL failed: {upload_response.message}"})
+                continue
+            
+            upload_url = upload_response.data.get("uploadUrl") or upload_response.data.get("url")
+            resource_url = upload_response.data.get("resourceUrl") or upload_response.data.get("accessUrl")
+            
+            if not upload_url:
+                results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": "No upload URL returned"})
+                continue
+            
+            # Upload to GeeLark OSS
+            try:
+                with open(video_path, "rb") as f:
+                    upload_res = req.put(upload_url, data=f, timeout=120)
+                    if upload_res.status_code not in [200, 201]:
+                        results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"OSS upload failed: {upload_res.status_code}"})
+                        continue
+            except Exception as e:
+                results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"Upload error: {str(e)}"})
+                continue
+            
+            # Transfer to this specific phone
             transfer_response = geelark.upload_file_to_phone(
                 phone_id=phone_id,
                 resource_url=resource_url,
@@ -1423,80 +1416,124 @@ async def post_videos_to_tiktok(
             )
             
             if not transfer_response.success:
-                results.append({
-                    "video": video_filename,
-                    "phone_id": phone_id,
-                    "success": False,
-                    "error": f"File transfer failed: {transfer_response.message}"
-                })
+                results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"Transfer failed: {transfer_response.message}"})
                 continue
             
-            # Wait a moment for transfer
             time.sleep(2)
             
-            # Create posting task - use the resourceUrl directly!
-            # The video API takes a URL, not a file path on phone
             post_response = geelark.post_tiktok_video(
                 phone_id=phone_id,
-                video_url=resource_url,  # Use the GeeLark OSS URL
+                video_url=resource_url,
                 caption=full_caption
             )
             
             if post_response.success:
-                results.append({
-                    "video": video_filename,
-                    "phone_id": phone_id,
-                    "success": True,
-                    "task_id": post_response.data.get("taskId") or (post_response.data.get("taskIds") or [None])[0] if post_response.data else None,
-                    "message": "Posting task created"
-                })
+                task_id = post_response.data.get("taskId") or (post_response.data.get("taskIds") or [None])[0] if post_response.data else None
+                results.append({"video": video_filename, "phone_id": phone_id, "success": True, "task_id": task_id})
+                logger.info(f"[PostJob {job_id}] Posted {video_filename} → {phone_id[:8]}...")
             else:
-                results.append({
-                    "video": video_filename,
-                    "phone_id": phone_id,
-                    "success": False,
-                    "error": f"Posting task failed: {post_response.message}"
-                })
+                results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"Post failed: {post_response.message}"})
+        
+        successful = sum(1 for r in results if r.get("success"))
+        failed = len(results) - successful
+        
+        # Auto-stop phones
+        if auto_stop and phones_started:
+            with _posting_jobs_lock:
+                _posting_jobs[job_id]["message"] = "Stopping phones..."
+            time.sleep(5)
+            geelark.stop_phones(phones_started)
+        
+        # Auto-delete videos
+        deleted_videos = []
+        if auto_delete and successful > 0:
+            for r in results:
+                if r.get("success") and r.get("video"):
+                    try:
+                        video_path = generator.output_dir / r["video"]
+                        if video_path.exists():
+                            os.remove(video_path)
+                            deleted_videos.append(r["video"])
+                    except Exception:
+                        pass
+        
+        with _posting_jobs_lock:
+            _posting_jobs[job_id]["status"] = "completed"
+            _posting_jobs[job_id]["message"] = f"Complete: {successful}/{len(results)} successful"
+            _posting_jobs[job_id]["successful"] = successful
+            _posting_jobs[job_id]["failed"] = failed
+            _posting_jobs[job_id]["results"] = results
+            _posting_jobs[job_id]["videos_deleted"] = len(deleted_videos)
+        
+        logger.info(f"[PostJob {job_id}] Complete: {successful} success, {failed} failed")
+        
+    except Exception as e:
+        logger.error(f"[PostJob {job_id}] Failed: {e}")
+        with _posting_jobs_lock:
+            _posting_jobs[job_id]["status"] = "failed"
+            _posting_jobs[job_id]["message"] = str(e)
+
+
+@router.post("/videos/post/batch")
+async def post_videos_to_tiktok(
+    data: dict,
+    background_tasks: BackgroundTasks
+):
+    """
+    Start video posting job (returns immediately with job_id).
+    Uses background task to prevent timeout.
     
-    successful = sum(1 for r in results if r.get("success"))
-    failed = len(results) - successful
+    Poll /videos/post/job/{job_id} for status.
+    """
+    video_filenames = data.get("videos", [])
+    phone_ids = data.get("phone_ids", [])
+    caption = data.get("caption", "")
+    hashtags = data.get("hashtags", "#teamwork #teamworktrend #teamworkchallenge")
+    auto_start = data.get("auto_start", True)
+    auto_stop = data.get("auto_stop", True)
+    auto_delete = data.get("auto_delete", False)
+    distribute_mode = data.get("distribute_mode", "one_to_one")  # 'one_to_one' or 'round_robin'
     
-    # Step 4: Auto-stop phones if we started them
-    if auto_stop and phones_started:
-        logger.info(f"Auto-stopping {len(phones_started)} phone(s) after posting...")
-        # Short delay to let tasks register
-        time.sleep(5)
-        stop_response = geelark.stop_phones(phones_started)
-        if stop_response.success:
-            logger.info("Phones stopped successfully")
-        else:
-            logger.warning(f"Failed to stop phones: {stop_response.message}")
+    if not video_filenames or not phone_ids:
+        raise HTTPException(status_code=400, detail="Videos and phone_ids required")
     
-    # Step 5: Auto-delete successfully posted videos
-    deleted_videos = []
-    if auto_delete and successful > 0:
-        logger.info(f"Auto-deleting {successful} successfully posted video(s)...")
-        for r in results:
-            if r.get("success") and r.get("video"):
-                try:
-                    video_path = generator.output_dir / r["video"]
-                    if video_path.exists():
-                        os.remove(video_path)
-                        deleted_videos.append(r["video"])
-                        logger.info(f"Deleted: {r['video']}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete {r['video']}: {e}")
+    job_id = str(uuid.uuid4())[:8]
+    
+    with _posting_jobs_lock:
+        _posting_jobs[job_id] = {
+            "status": "queued",
+            "message": "Starting posting job...",
+            "created_at": datetime.utcnow().isoformat(),
+            "videos": video_filenames,
+            "phone_ids": phone_ids,
+            "successful": 0,
+            "failed": 0,
+            "results": [],
+            "videos_deleted": 0
+        }
+    
+    # Start background task
+    background_tasks.add_task(
+        _run_posting_job,
+        job_id, video_filenames, phone_ids, caption, hashtags, auto_start, auto_stop, auto_delete, distribute_mode
+    )
     
     return {
-        "success": successful > 0,
-        "total": len(results),
-        "successful": successful,
-        "failed": failed,
-        "phones_started": len(phones_started) if auto_start else 0,
-        "phones_stopped": len(phones_started) if auto_stop and phones_started else 0,
-        "videos_deleted": len(deleted_videos),
-        "results": results
+        "success": True,
+        "job_id": job_id,
+        "message": f"Posting job started for {len(video_filenames)} video(s) to {len(phone_ids)} phone(s)",
+        "poll_url": f"/api/videos/post/job/{job_id}"
     }
+
+
+@router.get("/videos/post/job/{job_id}")
+async def get_posting_job_status(job_id: str):
+    """Get status of a posting job."""
+    with _posting_jobs_lock:
+        if job_id not in _posting_jobs:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return _posting_jobs[job_id].copy()
+
 
 
 # ===========================

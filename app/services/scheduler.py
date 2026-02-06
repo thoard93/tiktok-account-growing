@@ -233,12 +233,13 @@ class AutomationScheduler:
                             "videos": video_filenames,
                             "phone_ids": phone_ids,
                             "caption": "",
-                            "hashtags": "#teamwork #teamworktrend #fyp #viral",
+                            "hashtags": "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo",
                             "auto_start": True,
                             "auto_stop": True,
-                            "auto_delete": auto_delete
+                            "auto_delete": auto_delete,
+                            "distribute_mode": "round_robin"  # Multiple videos per phone for scheduler
                         },
-                        timeout=300  # 5 min timeout for phone boot + upload
+                        timeout=30  # Quick timeout - job runs in background now
                     )
                     if resp.status_code == 200:
                         result = resp.json()
