@@ -1483,13 +1483,10 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
 
 
 @router.post("/videos/post/batch")
-async def post_videos_to_tiktok(
-    data: dict,
-    background_tasks: BackgroundTasks
-):
+async def post_videos_to_tiktok(data: dict):
     """
     Start video posting job (returns immediately with job_id).
-    Uses background task to prevent timeout.
+    Uses threading for reliable background execution on Gunicorn.
     
     Poll /videos/post/job/{job_id} for status.
     """
@@ -1520,11 +1517,15 @@ async def post_videos_to_tiktok(
             "videos_deleted": 0
         }
     
-    # Start background task
-    background_tasks.add_task(
-        _run_posting_job,
-        job_id, video_filenames, phone_ids, caption, hashtags, auto_start, auto_stop, auto_delete, distribute_mode
+    # Start background task using threading (more reliable than FastAPI BackgroundTasks on Gunicorn)
+    import threading
+    task_thread = threading.Thread(
+        target=_run_posting_job,
+        args=(job_id, video_filenames, phone_ids, caption, hashtags, auto_start, auto_stop, auto_delete, distribute_mode),
+        daemon=True
     )
+    task_thread.start()
+    logger.info(f"[PostJob {job_id}] Background thread started")
     
     return {
         "success": True,
