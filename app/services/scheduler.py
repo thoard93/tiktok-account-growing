@@ -243,7 +243,10 @@ class AutomationScheduler:
                     )
                     if resp.status_code == 200:
                         result = resp.json()
-                        logger.info(f"Auto-posting result: {result.get('successful', 0)}/{result.get('total', 0)} success, {result.get('videos_deleted', 0)} deleted")
+                        if result.get("job_id"):
+                            logger.info(f"Auto-posting job started: job_id={result['job_id']} - runs in background")
+                        else:
+                            logger.warning(f"Unexpected response format: {result}")
                     else:
                         logger.error(f"Auto-posting failed: {resp.status_code} - {resp.text}")
                 except Exception as e:
