@@ -1,14 +1,14 @@
 """
-TikTok Account Automation System
-================================
+TikTok Account Automation System v2.0
+=====================================
 FastAPI application for automating TikTok account growth using GeeLark cloud phones.
 
 Features:
-- Account creation with GeeLark cloud phones
-- Proxy management (Proxiware integration)
-- Progressive warmup automation
-- Video upload and posting
-- Activity logging and monitoring
+- Automated daily pipeline: Warmup → Video Generation → Posting
+- Per-account scheduling with enable/disable
+- GeeLark cloud phone management
+- AI video generation (Claude + Nano Banana Pro + Grok Imagine)
+- Pipeline activity logging
 """
 
 import os
@@ -37,7 +37,9 @@ logger.add(
 async def lifespan(app: FastAPI):
     """Application lifecycle manager."""
     # Startup
-    logger.info("Starting TikTok Automation System...")
+    logger.info("=" * 60)
+    logger.info("Starting TikTok Automation System v2.0")
+    logger.info("=" * 60)
     
     # Ensure directories exist
     os.makedirs("data", exist_ok=True)
@@ -48,34 +50,53 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
     
-    # Test GeeLark connection (optional)
+    # Initialize and start scheduler
+    scheduler = None
     try:
         from app.services.geelark_client import GeeLarkClient
         creds = settings.get_geelark_credentials()
+        
         if creds["method"] == "TOKEN" and creds["token"]:
             client = GeeLarkClient(
                 base_url=settings.geelark_api_base_url,
                 auth_method="TOKEN",
                 app_token=creds["token"]
             )
+            
             if client.test_connection():
                 logger.info("GeeLark API connected successfully")
+                
+                # Start the scheduler
+                from app.services.scheduler import get_scheduler
+                scheduler = get_scheduler(client)
+                scheduler.start()
+                
+                # Log all scheduled jobs
+                jobs = scheduler.get_jobs()
+                logger.info(f"Scheduler started with {len(jobs)} jobs:")
+                for job in jobs:
+                    logger.info(f"  → {job['id']}: next run at {job.get('next_run', 'N/A')}")
             else:
-                logger.warning("GeeLark API connection failed - check credentials")
+                logger.warning("GeeLark API connection failed — scheduler NOT started")
+        else:
+            logger.warning("No GeeLark token configured — scheduler NOT started")
     except Exception as e:
-        logger.warning(f"Could not test GeeLark connection: {e}")
+        logger.error(f"Scheduler startup failed: {e}")
     
     yield
     
     # Shutdown
-    logger.info("Shutting down TikTok Automation System...")
+    if scheduler:
+        scheduler.stop()
+        logger.info("Scheduler stopped")
+    logger.info("TikTok Automation System shut down")
 
 
 # Create FastAPI app
 app = FastAPI(
     title="TikTok Account Automation",
     description="Automate TikTok account growth using GeeLark cloud phones",
-    version="0.1.0",
+    version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc"
@@ -84,7 +105,7 @@ app = FastAPI(
 # CORS middleware (allow dashboard access)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,7 +120,7 @@ async def root():
     """Root endpoint with API info."""
     return {
         "name": "TikTok Account Automation System",
-        "version": "0.1.0",
+        "version": "2.0.0",
         "docs": "/docs",
         "health": "/api/health"
     }
@@ -113,3 +134,4 @@ if __name__ == "__main__":
         port=int(os.getenv("PORT", 8000)),
         reload=settings.debug
     )
+

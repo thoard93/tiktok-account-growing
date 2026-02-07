@@ -1,370 +1,439 @@
 """
-Scheduler Service
-=================
-Background scheduler for automated warmup and posting tasks.
+Scheduler Service v2.0
+======================
+Background scheduler for the automated daily pipeline.
+
+Pipeline (all times EST):
+  1. Warmup  — 8:00 AM  (configurable)
+  2. Video Generation — 9:00 AM  (configurable)
+  3. Video Posting — 10 AM, 1 PM, 5 PM  (configurable)
+
+Uses per-account scheduling: each Account has schedule_enabled, schedule_warmup,
+and schedule_posting flags. ScheduleConfig.enabled is the master switch.
 """
 
 import time
-from datetime import datetime, timedelta
-from typing import Optional, List
+import os
+from datetime import datetime, date, timedelta
+from typing import Optional, List, Dict, Any
 from loguru import logger
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models.account import Account, AccountStatus, ScheduleConfig
-from app.services.warmup_service import WarmupService
-from app.services.posting_service import PostingService
+from app.models.account import Account, ScheduleConfig, PipelineLog, AccountStatus
 from app.services.geelark_client import GeeLarkClient
 from app.config import get_settings
+
+# EST is UTC-5 (no DST handling — simple offset)
+EST_OFFSET = 5
+
+
+def est_to_utc(est_hour: int) -> int:
+    """Convert EST hour to UTC hour."""
+    return (est_hour + EST_OFFSET) % 24
 
 
 class AutomationScheduler:
     """
-    Background scheduler for running automated tasks.
+    Background scheduler for the automated daily pipeline.
     
-    Handles:
-    - Daily warmup sessions for accounts in warmup phase
-    - Automatic video posting for active accounts  
-    - Task status monitoring
-    - Cleanup of completed tasks
+    Pipeline phases:
+    1. Warmup: Start GeeLark phones, run TikTok browsing
+    2. Video Generation: Generate AI teamwork videos
+    3. Posting: Upload and post videos to scheduled accounts
     """
     
     def __init__(self, geelark_client: GeeLarkClient):
-        """Initialize scheduler with GeeLark client."""
         self.settings = get_settings()
         self.geelark = geelark_client
         self.scheduler = BackgroundScheduler()
         self._running = False
-        
-        logger.info("AutomationScheduler initialized")
+        logger.info("AutomationScheduler v2.0 initialized")
     
-    def _get_db_session(self) -> Session:
+    def _get_db(self) -> Session:
         """Get a new database session."""
         return SessionLocal()
     
-    def _get_schedule_config(self, db: Session = None) -> dict:
-        """
-        Get scheduling configuration from database.
-        Returns enabled status, phone_ids, and other settings.
-        """
-        close_db = False
-        if db is None:
-            db = self._get_db_session()
-            close_db = True
-        
+    def _get_config(self, db: Session = None) -> dict:
+        """Get global schedule config from database."""
+        close = db is None
+        if close:
+            db = self._get_db()
         try:
             config = db.query(ScheduleConfig).filter(ScheduleConfig.key == "main").first()
             if config:
                 return {
                     "enabled": config.enabled,
-                    "phone_ids": config.phone_ids or [],
                     "posts_per_phone": config.posts_per_phone,
                     "enable_warmup": config.enable_warmup,
-                    "auto_delete": config.auto_delete
+                    "auto_delete": config.auto_delete,
+                    "warmup_hour_est": config.warmup_hour_est or 8,
+                    "video_gen_hour_est": config.video_gen_hour_est or 9,
+                    "posting_hours_est": config.posting_hours_est or "10,13,17",
+                    # Legacy: also read phone_ids for backwards compat
+                    "phone_ids": config.phone_ids or [],
                 }
-            else:
-                return {
-                    "enabled": False,
-                    "phone_ids": [],
-                    "posts_per_phone": 3,
-                    "enable_warmup": True,
-                    "auto_delete": True
-                }
+            return {
+                "enabled": False,
+                "posts_per_phone": 3,
+                "enable_warmup": True,
+                "auto_delete": True,
+                "warmup_hour_est": 8,
+                "video_gen_hour_est": 9,
+                "posting_hours_est": "10,13,17",
+                "phone_ids": [],
+            }
         finally:
-            if close_db:
+            if close:
                 db.close()
     
-    # ===========================
-    # Warmup Jobs
-    # ===========================
+    def _get_scheduled_accounts(self, db: Session, phase: str = "all") -> List[Account]:
+        """Get accounts that are scheduled for the given phase."""
+        query = db.query(Account).filter(Account.schedule_enabled == True)
+        if phase == "warmup":
+            query = query.filter(Account.schedule_warmup == True)
+        elif phase == "posting":
+            query = query.filter(Account.schedule_posting == True)
+        return query.all()
+    
+    def _log_pipeline(self, db: Session, phase: str, status: str,
+                      phone_id: str = None, account_name: str = None,
+                      details: dict = None, error: str = None,
+                      duration: float = None) -> PipelineLog:
+        """Write a PipelineLog entry."""
+        log = PipelineLog(
+            pipeline_date=date.today(),
+            phase=phase,
+            phone_id=phone_id,
+            account_name=account_name,
+            status=status,
+            details=details,
+            error_message=error,
+            duration_seconds=duration,
+            started_at=datetime.utcnow(),
+            completed_at=datetime.utcnow() if status in ("completed", "failed", "skipped") else None,
+        )
+        db.add(log)
+        db.commit()
+        return log
+    
+    # =====================================================================
+    # Phase 1: Daily Warmup
+    # =====================================================================
     
     def run_daily_warmup(self):
         """
-        Run warmup for all accounts in warming_up status.
-        Called once per day by scheduler.
+        Run warmup for all accounts with schedule_enabled + schedule_warmup.
+        Each account's GeeLark phone is started, warmup flow is run, then stopped.
         """
-        logger.info("Starting daily warmup job...")
+        logger.info("=" * 50)
+        logger.info("PIPELINE PHASE 1: Daily Warmup")
+        logger.info("=" * 50)
         
-        db = self._get_db_session()
-        try:
-            warmup_service = WarmupService(db, self.geelark)
-            results = warmup_service.run_batch_warmup()
-            
-            logger.info(
-                f"Daily warmup complete: {results['success']} success, "
-                f"{results['failed']} failed, {results['completed']} completed warmup"
-            )
-            
-        except Exception as e:
-            logger.error(f"Daily warmup job failed: {e}")
-        finally:
-            db.close()
-    
-    def check_warmup_progress(self):
-        """
-        Check warmup progress and advance accounts to next day.
-        Called periodically to monitor warmup completion.
-        """
-        logger.debug("Checking warmup progress...")
+        config = self._get_config()
+        if not config["enabled"]:
+            logger.info("Pipeline DISABLED — skipping warmup")
+            return
         
-        db = self._get_db_session()
+        if not config["enable_warmup"]:
+            logger.info("Warmup disabled in config — skipping")
+            return
+        
+        db = self._get_db()
         try:
-            # Get accounts that ran warmup today
-            today = datetime.utcnow().date()
-            yesterday = today - timedelta(days=1)
+            accounts = self._get_scheduled_accounts(db, "warmup")
+            if not accounts:
+                logger.info("No accounts scheduled for warmup")
+                self._log_pipeline(db, "warmup", "skipped",
+                                   details={"reason": "no_accounts_scheduled"})
+                return
             
-            warming_accounts = db.query(Account).filter(
-                Account.status == AccountStatus.WARMING_UP,
-                Account.warmup_complete == False
-            ).all()
+            logger.info(f"Warming up {len(accounts)} accounts")
+            self._log_pipeline(db, "warmup", "started",
+                               details={"account_count": len(accounts)})
             
-            for account in warming_accounts:
-                # Check if last activity was today
-                if account.last_activity and account.last_activity.date() == today:
-                    # Already ran warmup today, check if can advance
-                    pass
-                elif account.last_activity and account.last_activity.date() < yesterday:
-                    # Missed a day - may need reset or notification
-                    logger.warning(
-                        f"Account {account.id} missed warmup day "
-                        f"(last: {account.last_activity})"
+            success_count = 0
+            fail_count = 0
+            
+            for account in accounts:
+                phone_id = account.geelark_profile_id
+                name = account.geelark_profile_name or f"Account #{account.id}"
+                
+                if not phone_id:
+                    logger.warning(f"Skipping {name} — no GeeLark phone ID")
+                    fail_count += 1
+                    continue
+                
+                start_time = time.time()
+                try:
+                    logger.info(f"  → Warmup: {name} ({phone_id})")
+                    
+                    # Start the phone
+                    start_resp = self.geelark.start_phones([phone_id])
+                    if not start_resp.success:
+                        raise Exception(f"Failed to start phone: {start_resp.message}")
+                    
+                    # Wait for phone boot
+                    time.sleep(30)
+                    
+                    # Run warmup flow (browse TikTok for 15-30 min)
+                    from app.services.warmup_service import WarmupService
+                    warmup_svc = WarmupService(db, self.geelark)
+                    warmup_svc.run_single_warmup(
+                        phone_id=phone_id,
+                        action="search video",
+                        keywords=["teamwork trend", "teamwork challenge"],
+                        duration_minutes=20
                     )
                     
+                    duration = time.time() - start_time
+                    self._log_pipeline(db, "warmup", "completed",
+                                       phone_id=phone_id, account_name=name,
+                                       duration=duration)
+                    success_count += 1
+                    logger.info(f"  ✓ Warmup complete: {name} ({duration:.0f}s)")
+                    
+                except Exception as e:
+                    duration = time.time() - start_time
+                    self._log_pipeline(db, "warmup", "failed",
+                                       phone_id=phone_id, account_name=name,
+                                       error=str(e), duration=duration)
+                    fail_count += 1
+                    logger.error(f"  ✗ Warmup failed for {name}: {e}")
+                
+                finally:
+                    # Always try to stop the phone after warmup
+                    try:
+                        self.geelark.stop_phones([phone_id])
+                    except Exception:
+                        pass
+                    
+                    # Small delay between accounts
+                    time.sleep(5)
+            
+            logger.info(f"Warmup phase complete: {success_count} success, {fail_count} failed")
+            
         except Exception as e:
-            logger.error(f"Warmup progress check failed: {e}")
+            logger.error(f"Warmup phase crashed: {e}")
+            self._log_pipeline(db, "warmup", "failed", error=str(e))
         finally:
             db.close()
     
-    # ===========================
-    # Posting Jobs
-    # ===========================
-    
-    def run_auto_posting(self):
-        """
-        Auto-post videos to active accounts.
-        Called by scheduler based on posting schedule.
-        """
-        logger.info("Starting auto-posting job...")
-        
-        db = self._get_db_session()
-        try:
-            posting_service = PostingService(db, self.geelark)
-            results = posting_service.auto_assign_and_post(
-                videos_per_account=1
-            )
-            
-            logger.info(
-                f"Auto-posting complete: {results['videos_posted']} videos "
-                f"posted to {results['accounts_used']} accounts"
-            )
-            
-        except Exception as e:
-            logger.error(f"Auto-posting job failed: {e}")
-        finally:
-            db.close()
+    # =====================================================================
+    # Phase 2: Daily Video Generation
+    # =====================================================================
     
     def run_daily_video_generation(self):
         """
-        Generate AI teamwork trend videos and post to scheduled phones.
-        Full pipeline: Claude prompt → Nano Banana Pro → Grok Imagine → FFmpeg → GeeLark post.
+        Generate AI teamwork videos for all scheduled posting accounts.
+        Videos per account = posts_per_phone from config.
         """
-        logger.info("Starting daily video generation job...")
+        logger.info("=" * 50)
+        logger.info("PIPELINE PHASE 2: Video Generation")
+        logger.info("=" * 50)
         
-        # Check if scheduling is enabled in database
-        config = self._get_schedule_config()
-        if not config.get("enabled"):
-            logger.info("Scheduling is DISABLED in database config - skipping video generation")
+        config = self._get_config()
+        if not config["enabled"]:
+            logger.info("Pipeline DISABLED — skipping video generation")
             return
         
-        phone_ids = config.get("phone_ids", [])
-        posts_per_phone = config.get("posts_per_phone", 3)
-        auto_delete = config.get("auto_delete", True)
-        
-        if not phone_ids:
-            logger.warning("No phones configured for scheduling - skipping video generation")
-            return
-        
-        # Calculate videos needed: phones × posts per phone
-        videos_needed = len(phone_ids) * posts_per_phone
-        
-        logger.info(f"Schedule config: {len(phone_ids)} phones × {posts_per_phone} posts = {videos_needed} videos needed")
-        
+        db = self._get_db()
         try:
-            from app.services.video_generator import get_video_generator
-            import requests
-            import os
+            accounts = self._get_scheduled_accounts(db, "posting")
+            if not accounts:
+                logger.info("No accounts scheduled for posting — skipping video gen")
+                self._log_pipeline(db, "video_gen", "skipped",
+                                   details={"reason": "no_accounts_scheduled"})
+                return
             
+            posts_per = config["posts_per_phone"]
+            videos_needed = len(accounts) * posts_per
+            
+            logger.info(f"Generating {videos_needed} videos ({len(accounts)} accounts × {posts_per} each)")
+            self._log_pipeline(db, "video_gen", "started",
+                               details={"videos_needed": videos_needed,
+                                        "account_count": len(accounts)})
+            
+            start_time = time.time()
+            
+            from app.services.video_generator import get_video_generator
             generator = get_video_generator()
             
-            # Generate required number of videos
-            style_hints = ["nature", "beach", "city", "sunset", "mountains"][:videos_needed]
+            style_hints = ["nature", "beach", "city", "sunset", "mountains",
+                          "forest", "ocean", "snow", "desert", "garden"]
             results = generator.generate_batch(
                 count=videos_needed,
-                style_hints=style_hints,
+                style_hints=style_hints[:videos_needed],
                 skip_overlay=False
             )
             
             successful = [r for r in results if r.success]
             failed = [r for r in results if not r.success]
-            
             total_cost = sum(r.cost_usd for r in results)
+            duration = time.time() - start_time
+            
+            self._log_pipeline(db, "video_gen", "completed",
+                               details={
+                                   "videos_generated": len(successful),
+                                   "videos_failed": len(failed),
+                                   "cost_usd": round(total_cost, 2),
+                               },
+                               duration=duration)
             
             logger.info(
-                f"Daily video generation complete: {len(successful)} success, "
-                f"{len(failed)} failed, total cost: ${total_cost:.2f}"
+                f"Video generation complete: {len(successful)} success, "
+                f"{len(failed)} failed, ${total_cost:.2f} cost, {duration:.0f}s"
             )
             
-            # Auto-post to configured phones
-            if successful and phone_ids:
-                video_filenames = [os.path.basename(r.video_path) for r in successful if r.video_path]
-                logger.info(f"Videos ready for posting: {video_filenames}")
-                
-                logger.info(f"Auto-posting {len(video_filenames)} videos to {len(phone_ids)} phones with auto start/stop...")
-                
-                # Use internal API call to post/batch endpoint (handles all the flow)
-                api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
-                try:
-                    resp = requests.post(
-                        f"{api_base}/api/videos/post/batch",
-                        json={
-                            "videos": video_filenames,
-                            "phone_ids": phone_ids,
-                            "caption": "",
-                            "hashtags": "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo",
-                            "auto_start": True,
-                            "auto_stop": True,
-                            "auto_delete": auto_delete,
-                            "distribute_mode": "round_robin"  # Multiple videos per phone for scheduler
-                        },
-                        timeout=30  # Quick timeout - job runs in background now
-                    )
-                    if resp.status_code == 200:
-                        result = resp.json()
-                        if result.get("job_id"):
-                            logger.info(f"Auto-posting job started: job_id={result['job_id']} - runs in background")
-                        else:
-                            logger.warning(f"Unexpected response format: {result}")
-                    else:
-                        logger.error(f"Auto-posting failed: {resp.status_code} - {resp.text}")
-                except Exception as e:
-                    logger.error(f"Auto-posting request failed: {e}")
+        except Exception as e:
+            logger.error(f"Video generation phase crashed: {e}")
+            self._log_pipeline(db, "video_gen", "failed", error=str(e))
+        finally:
+            db.close()
+    
+    # =====================================================================
+    # Phase 3: Auto-Posting
+    # =====================================================================
+    
+    def run_auto_posting(self):
+        """
+        Post generated videos to all scheduled posting accounts.
+        Uses the /api/videos/post/batch endpoint internally.
+        """
+        logger.info("=" * 50)
+        logger.info("PIPELINE PHASE 3: Auto-Posting")
+        logger.info("=" * 50)
+        
+        config = self._get_config()
+        if not config["enabled"]:
+            logger.info("Pipeline DISABLED — skipping posting")
+            return
+        
+        db = self._get_db()
+        try:
+            accounts = self._get_scheduled_accounts(db, "posting")
+            if not accounts:
+                logger.info("No accounts scheduled for posting")
+                self._log_pipeline(db, "posting", "skipped",
+                                   details={"reason": "no_accounts_scheduled"})
+                return
+            
+            phone_ids = [a.geelark_profile_id for a in accounts if a.geelark_profile_id]
+            if not phone_ids:
+                logger.warning("Scheduled accounts have no phone IDs")
+                return
+            
+            self._log_pipeline(db, "posting", "started",
+                               details={"phone_count": len(phone_ids)})
+            
+            start_time = time.time()
+            
+            import requests
+            # Get available videos
+            api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
+            # Use internal URL for server-to-server calls
+            internal_base = os.getenv("INTERNAL_API_URL", api_base)
+            
+            videos_resp = requests.get(f"{internal_base}/api/videos/list", timeout=10)
+            if videos_resp.status_code != 200:
+                raise Exception(f"Failed to get video list: {videos_resp.status_code}")
+            
+            videos_data = videos_resp.json()
+            video_filenames = [v["filename"] for v in videos_data.get("videos", [])]
+            
+            if not video_filenames:
+                logger.warning("No videos available for posting")
+                self._log_pipeline(db, "posting", "skipped",
+                                   details={"reason": "no_videos_available"})
+                return
+            
+            # Post videos to phones
+            posts_per = config["posts_per_phone"]
+            post_resp = requests.post(
+                f"{internal_base}/api/videos/post/batch",
+                json={
+                    "videos": video_filenames[:posts_per * len(phone_ids)],
+                    "phone_ids": phone_ids,
+                    "caption": "",
+                    "hashtags": "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo",
+                    "auto_start": True,
+                    "auto_stop": True,
+                    "auto_delete": config["auto_delete"],
+                    "distribute_mode": "round_robin"
+                },
+                timeout=30
+            )
+            
+            duration = time.time() - start_time
+            
+            if post_resp.status_code == 200:
+                result = post_resp.json()
+                job_id = result.get("job_id", "unknown")
+                self._log_pipeline(db, "posting", "completed",
+                                   details={
+                                       "job_id": job_id,
+                                       "videos_count": len(video_filenames),
+                                       "phone_count": len(phone_ids),
+                                   },
+                                   duration=duration)
+                logger.info(f"Posting job started: {job_id}")
+            else:
+                raise Exception(f"Posting failed: {post_resp.status_code} - {post_resp.text}")
             
         except Exception as e:
-            logger.error(f"Daily video generation failed: {e}")
+            logger.error(f"Posting phase crashed: {e}")
+            self._log_pipeline(db, "posting", "failed", error=str(e))
+        finally:
+            db.close()
     
-    # ===========================
-    # Task Monitoring Jobs
-    # ===========================
+    # =====================================================================
+    # Monitoring Jobs
+    # =====================================================================
     
     def check_pending_tasks(self):
-        """
-        Check status of pending GeeLark tasks and update activity logs.
-        """
-        logger.debug("Checking pending tasks...")
-        
-        db = self._get_db_session()
+        """Check status of pending GeeLark tasks."""
+        db = self._get_db()
         try:
             from app.models.account import ActivityLog
+            pending = db.query(ActivityLog).filter(
+                ActivityLog.success == None,
+                ActivityLog.geelark_task_id != None
+            ).all()
             
-            # Get recent pending tasks (last 24 hours)
-            cutoff = datetime.utcnow() - timedelta(hours=24)
-            
-            pending_logs = db.query(ActivityLog).filter(
-                ActivityLog.geelark_task_id.isnot(None),
-                ActivityLog.success == True,  # Initial success (task created)
-                ActivityLog.created_at >= cutoff
-            ).limit(50).all()
-            
-            if not pending_logs:
+            if not pending:
                 return
             
-            # Query task status
-            task_ids = [log.geelark_task_id for log in pending_logs if log.geelark_task_id]
-            if not task_ids:
-                return
+            task_ids = [p.geelark_task_id for p in pending]
+            logger.debug(f"Checking {len(task_ids)} pending tasks")
             
             response = self.geelark.query_tasks(task_ids)
-            
             if response.success and response.data:
-                items = response.data.get("items", [])
-                task_map = {t["id"]: t for t in items}
-                
-                for log in pending_logs:
-                    if log.geelark_task_id in task_map:
-                        task = task_map[log.geelark_task_id]
-                        status = task.get("status")
-                        
-                        # Update if failed
-                        if status == 4:  # Failed
+                for task_data in response.data:
+                    task_id = task_data.get("taskId")
+                    status = task_data.get("status")
+                    
+                    log = next((p for p in pending if p.geelark_task_id == task_id), None)
+                    if log and status is not None:
+                        if status == 2:  # Success
+                            log.success = True
+                        elif status in (3, 4):  # Failed/Cancelled
                             log.success = False
-                            log.error_message = task.get("failDesc", "Task failed")
-                            
-                            # Update account if it was a critical action
-                            if log.action_type in ["warmup_session", "video_posted"]:
-                                account = db.query(Account).filter(
-                                    Account.id == log.account_id
-                                ).first()
-                                if account and "blocked" in log.error_message.lower():
-                                    account.status = AccountStatus.BANNED
+                            log.error_message = task_data.get("failReason", "Unknown")
                 
                 db.commit()
                 
         except Exception as e:
-            logger.error(f"Task monitoring failed: {e}")
+            logger.error(f"Task check failed: {e}")
         finally:
             db.close()
     
-    def retry_failed_tasks(self):
-        """
-        Automatically retry tasks that failed due to transient errors.
-        """
-        logger.debug("Checking for tasks to retry...")
-        
-        db = self._get_db_session()
-        try:
-            from app.models.account import ActivityLog
-            
-            # Get recent failed tasks (last 6 hours)
-            cutoff = datetime.utcnow() - timedelta(hours=6)
-            
-            failed_logs = db.query(ActivityLog).filter(
-                ActivityLog.geelark_task_id.isnot(None),
-                ActivityLog.success == False,
-                ActivityLog.created_at >= cutoff
-            ).limit(20).all()
-            
-            # Retryable error patterns (transient issues)
-            retryable_patterns = [
-                "network", "timeout", "loading", "connection",
-                "20100", "20108", "20124", "20133"
-            ]
-            
-            tasks_to_retry = []
-            for log in failed_logs:
-                error = (log.error_message or "").lower()
-                if any(p in error for p in retryable_patterns):
-                    tasks_to_retry.append(log.geelark_task_id)
-            
-            if tasks_to_retry:
-                response = self.geelark._make_request(
-                    "/task/restart",
-                    {"ids": tasks_to_retry}
-                )
-                
-                if response.success:
-                    logger.info(f"Retried {len(tasks_to_retry)} failed tasks")
-                    
-        except Exception as e:
-            logger.error(f"Task retry failed: {e}")
-        finally:
-            db.close()
-    
-    # ===========================
+    # =====================================================================
     # Scheduler Control
-    # ===========================
+    # =====================================================================
     
     def start(self):
         """Start the scheduler with configured jobs."""
@@ -372,25 +441,40 @@ class AutomationScheduler:
             logger.warning("Scheduler already running")
             return
         
-        # Daily warmup - runs at 8 AM EST (13:00 UTC) - 1 hour before video gen
+        config = self._get_config()
+        
+        # Phase 1: Warmup
+        warmup_utc = est_to_utc(config["warmup_hour_est"])
         self.scheduler.add_job(
             self.run_daily_warmup,
-            CronTrigger(hour=13, minute=0),  # 8 AM EST = 13:00 UTC
+            CronTrigger(hour=warmup_utc, minute=0),
             id="daily_warmup",
             replace_existing=True,
             max_instances=1
         )
         
-        # Auto-posting - 10 AM, 1 PM, 5 PM EST = 15, 18, 22 UTC
+        # Phase 2: Video Generation
+        vidgen_utc = est_to_utc(config["video_gen_hour_est"])
+        self.scheduler.add_job(
+            self.run_daily_video_generation,
+            CronTrigger(hour=vidgen_utc, minute=0),
+            id="daily_video_generation",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Phase 3: Posting (multiple times per day)
+        posting_hours = config["posting_hours_est"]
+        posting_utc = ",".join(str(est_to_utc(int(h.strip()))) for h in posting_hours.split(","))
         self.scheduler.add_job(
             self.run_auto_posting,
-            CronTrigger(hour="15,18,22"),  # 10 AM, 1 PM, 5 PM EST
+            CronTrigger(hour=posting_utc),
             id="auto_posting",
             replace_existing=True,
             max_instances=1
         )
         
-        # Task monitoring - runs every 5 minutes
+        # Monitoring: check pending tasks every 5 min
         self.scheduler.add_job(
             self.check_pending_tasks,
             IntervalTrigger(minutes=5),
@@ -399,73 +483,50 @@ class AutomationScheduler:
             max_instances=1
         )
         
-        # Task retry - runs every 30 minutes
-        self.scheduler.add_job(
-            self.retry_failed_tasks,
-            IntervalTrigger(minutes=30),
-            id="task_retry",
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        # Warmup progress check - runs every hour
-        self.scheduler.add_job(
-            self.check_warmup_progress,
-            IntervalTrigger(hours=1),
-            id="warmup_progress",
-            replace_existing=True,
-            max_instances=1
-        )
-        
-        # Daily video generation - 9 AM EST = 14:00 UTC
-        self.scheduler.add_job(
-            self.run_daily_video_generation,
-            CronTrigger(hour=14, minute=0),  # 9 AM EST = 14:00 UTC
-            id="daily_video_generation",
-            replace_existing=True,
-            max_instances=1
-        )
-        
         self.scheduler.start()
         self._running = True
-        logger.info("AutomationScheduler started")
+        
+        logger.info(f"Scheduler started — Pipeline times (EST):")
+        logger.info(f"  Warmup:     {config['warmup_hour_est']}:00 AM EST")
+        logger.info(f"  Video Gen:  {config['video_gen_hour_est']}:00 AM EST")
+        logger.info(f"  Posting:    {posting_hours} EST")
     
     def stop(self):
         """Stop the scheduler."""
-        if not self._running:
-            return
-        
-        self.scheduler.shutdown(wait=True)
-        self._running = False
-        logger.info("AutomationScheduler stopped")
+        if self._running:
+            self.scheduler.shutdown(wait=False)
+            self._running = False
+            logger.info("Scheduler stopped")
     
     def get_jobs(self) -> List[dict]:
-        """Get list of scheduled jobs."""
-        return [
-            {
+        """Get list of scheduled jobs with next run times."""
+        jobs = []
+        for job in self.scheduler.get_jobs():
+            jobs.append({
                 "id": job.id,
-                "next_run": str(job.next_run_time),
-                "trigger": str(job.trigger)
-            }
-            for job in self.scheduler.get_jobs()
-        ]
+                "name": job.name or job.id,
+                "next_run": str(job.next_run_time) if job.next_run_time else None,
+                "pending": job.pending,
+            })
+        return jobs
     
-    def run_job_now(self, job_id: str) -> bool:
+    def run_job_now(self, job_id: str):
         """Manually trigger a job to run immediately."""
         job = self.scheduler.get_job(job_id)
         if job:
-            job.modify(next_run_time=datetime.utcnow())
+            job.modify(next_run_time=datetime.now())
+            logger.info(f"Triggered job: {job_id}")
             return True
         return False
 
 
-# Singleton instance
+# Singleton
 _scheduler_instance: Optional[AutomationScheduler] = None
 
 
-def get_scheduler(geelark_client: GeeLarkClient) -> AutomationScheduler:
+def get_scheduler(geelark_client: GeeLarkClient = None) -> AutomationScheduler:
     """Get or create scheduler singleton."""
     global _scheduler_instance
-    if _scheduler_instance is None:
+    if _scheduler_instance is None and geelark_client:
         _scheduler_instance = AutomationScheduler(geelark_client)
     return _scheduler_instance

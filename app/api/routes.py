@@ -15,7 +15,7 @@ from loguru import logger
 
 from app.database import get_db
 from app.config import get_settings
-from app.models.account import Account, Proxy, Video, ActivityLog, AccountStatus, ScheduleConfig
+from app.models.account import Account, Proxy, Video, ActivityLog, AccountStatus, ScheduleConfig, PipelineLog
 from app.services.geelark_client import GeeLarkClient
 from app.services.account_manager import AccountManager
 from app.services.warmup_service import WarmupService
@@ -1783,6 +1783,9 @@ async def get_schedule_config(db: Session = Depends(get_db)):
             "posts_per_phone": 3,
             "enable_warmup": True,
             "auto_delete": True,
+            "warmup_hour_est": 8,
+            "video_gen_hour_est": 9,
+            "posting_hours_est": "10,13,17",
             "updated_at": None
         }
     
@@ -1792,6 +1795,9 @@ async def get_schedule_config(db: Session = Depends(get_db)):
         "posts_per_phone": config.posts_per_phone,
         "enable_warmup": config.enable_warmup,
         "auto_delete": config.auto_delete,
+        "warmup_hour_est": config.warmup_hour_est or 8,
+        "video_gen_hour_est": config.video_gen_hour_est or 9,
+        "posting_hours_est": config.posting_hours_est or "10,13,17",
         "updated_at": config.updated_at.isoformat() if config.updated_at else None
     }
 
@@ -1820,6 +1826,12 @@ async def save_schedule_config(data: dict, db: Session = Depends(get_db)):
         config.enable_warmup = data["enable_warmup"]
     if "auto_delete" in data:
         config.auto_delete = data["auto_delete"]
+    if "warmup_hour_est" in data:
+        config.warmup_hour_est = data["warmup_hour_est"]
+    if "video_gen_hour_est" in data:
+        config.video_gen_hour_est = data["video_gen_hour_est"]
+    if "posting_hours_est" in data:
+        config.posting_hours_est = data["posting_hours_est"]
     
     config.updated_at = datetime.utcnow()
     db.commit()
@@ -1834,6 +1846,208 @@ async def save_schedule_config(data: dict, db: Session = Depends(get_db)):
         "posts_per_phone": config.posts_per_phone,
         "enable_warmup": config.enable_warmup,
         "auto_delete": config.auto_delete,
+        "warmup_hour_est": config.warmup_hour_est,
+        "video_gen_hour_est": config.video_gen_hour_est,
+        "posting_hours_est": config.posting_hours_est,
         "updated_at": config.updated_at.isoformat() if config.updated_at else None
     }
 
+
+# ===========================
+# Pipeline Management (v2.0)
+# ===========================
+
+@router.get("/pipeline/logs")
+async def get_pipeline_logs(
+    days: int = Query(default=3, ge=1, le=30),
+    phase: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db)
+):
+    """Get pipeline activity logs for the last N days."""
+    from datetime import date, timedelta
+    cutoff = date.today() - timedelta(days=days)
+    
+    query = db.query(PipelineLog).filter(PipelineLog.pipeline_date >= cutoff)
+    if phase:
+        query = query.filter(PipelineLog.phase == phase)
+    
+    logs = query.order_by(PipelineLog.started_at.desc()).limit(200).all()
+    
+    return {
+        "logs": [
+            {
+                "id": log.id,
+                "date": log.pipeline_date.isoformat(),
+                "phase": log.phase,
+                "phone_id": log.phone_id,
+                "account_name": log.account_name,
+                "status": log.status,
+                "details": log.details,
+                "error": log.error_message,
+                "duration_seconds": log.duration_seconds,
+                "started_at": log.started_at.isoformat() if log.started_at else None,
+                "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+            }
+            for log in logs
+        ],
+        "total": len(logs)
+    }
+
+
+@router.get("/pipeline/status")
+async def get_pipeline_status(db: Session = Depends(get_db)):
+    """Get current pipeline status: what ran today, next run times, scheduled account count."""
+    from datetime import date
+    
+    # Today's pipeline logs
+    today_logs = db.query(PipelineLog).filter(
+        PipelineLog.pipeline_date == date.today()
+    ).order_by(PipelineLog.started_at.desc()).all()
+    
+    today_summary = {}
+    for log in today_logs:
+        if log.phase not in today_summary:
+            today_summary[log.phase] = {
+                "status": log.status,
+                "started_at": log.started_at.isoformat() if log.started_at else None,
+                "details": log.details,
+                "error": log.error_message,
+            }
+    
+    # Scheduled accounts
+    scheduled_count = db.query(Account).filter(Account.schedule_enabled == True).count()
+    warmup_count = db.query(Account).filter(
+        Account.schedule_enabled == True, Account.schedule_warmup == True
+    ).count()
+    posting_count = db.query(Account).filter(
+        Account.schedule_enabled == True, Account.schedule_posting == True
+    ).count()
+    
+    # Global config
+    config = db.query(ScheduleConfig).filter(ScheduleConfig.key == "main").first()
+    
+    # Next run times from scheduler
+    next_runs = {}
+    try:
+        from app.services.scheduler import get_scheduler
+        scheduler = get_scheduler()
+        if scheduler:
+            for job in scheduler.get_jobs():
+                next_runs[job["id"]] = job.get("next_run")
+    except Exception:
+        pass
+    
+    return {
+        "pipeline_enabled": config.enabled if config else False,
+        "today": today_summary,
+        "scheduled_accounts": {
+            "total": scheduled_count,
+            "warmup": warmup_count,
+            "posting": posting_count,
+        },
+        "config": {
+            "warmup_hour_est": config.warmup_hour_est if config else 8,
+            "video_gen_hour_est": config.video_gen_hour_est if config else 9,
+            "posting_hours_est": config.posting_hours_est if config else "10,13,17",
+            "posts_per_phone": config.posts_per_phone if config else 3,
+        },
+        "next_runs": next_runs,
+    }
+
+
+@router.post("/accounts/{account_id}/schedule")
+async def update_account_schedule(
+    account_id: int,
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """Enable/disable scheduling for a specific account."""
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(404, "Account not found")
+    
+    if "enabled" in data:
+        account.schedule_enabled = data["enabled"]
+    if "warmup" in data:
+        account.schedule_warmup = data["warmup"]
+    if "posting" in data:
+        account.schedule_posting = data["posting"]
+    
+    account.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "success": True,
+        "account_id": account.id,
+        "schedule_enabled": account.schedule_enabled,
+        "schedule_warmup": account.schedule_warmup,
+        "schedule_posting": account.schedule_posting,
+    }
+
+
+@router.get("/accounts/scheduled")
+async def get_scheduled_accounts(db: Session = Depends(get_db)):
+    """Get all accounts with their scheduling status."""
+    accounts = db.query(Account).order_by(Account.id).all()
+    
+    return {
+        "accounts": [
+            {
+                "id": a.id,
+                "name": a.geelark_profile_name or f"Account #{a.id}",
+                "phone_id": a.geelark_profile_id,
+                "tiktok_username": a.tiktok_username,
+                "status": a.status.value if a.status else "unknown",
+                "schedule_enabled": a.schedule_enabled or False,
+                "schedule_warmup": a.schedule_warmup if a.schedule_warmup is not None else True,
+                "schedule_posting": a.schedule_posting if a.schedule_posting is not None else True,
+                "last_activity": a.last_activity.isoformat() if a.last_activity else None,
+            }
+            for a in accounts
+        ]
+    }
+
+
+@router.post("/accounts/schedule/bulk")
+async def bulk_update_schedule(
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """Bulk enable/disable scheduling for multiple accounts."""
+    account_ids = data.get("account_ids", [])
+    enabled = data.get("enabled", True)
+    
+    if not account_ids:
+        raise HTTPException(400, "No account IDs provided")
+    
+    updated = db.query(Account).filter(Account.id.in_(account_ids)).update(
+        {Account.schedule_enabled: enabled, Account.updated_at: datetime.utcnow()},
+        synchronize_session="fetch"
+    )
+    db.commit()
+    
+    return {"success": True, "updated": updated}
+
+
+@router.post("/pipeline/trigger/{phase}")
+async def trigger_pipeline_phase(phase: str):
+    """Manually trigger a pipeline phase: warmup, video_gen, or posting."""
+    job_map = {
+        "warmup": "daily_warmup",
+        "video_gen": "daily_video_generation",
+        "posting": "auto_posting",
+    }
+    
+    if phase not in job_map:
+        raise HTTPException(400, f"Invalid phase: {phase}. Must be one of: {list(job_map.keys())}")
+    
+    from app.services.scheduler import get_scheduler
+    scheduler = get_scheduler()
+    if not scheduler:
+        raise HTTPException(503, "Scheduler not initialized")
+    
+    success = scheduler.run_job_now(job_map[phase])
+    if success:
+        return {"success": True, "message": f"Pipeline phase '{phase}' triggered"}
+    else:
+        raise HTTPException(404, f"Job not found: {job_map[phase]}")

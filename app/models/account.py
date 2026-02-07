@@ -7,8 +7,8 @@ Database models for accounts, proxies, videos, and activity tracking.
 import enum
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, 
-    ForeignKey, Text, Enum, JSON
+    Column, Integer, String, Boolean, DateTime, Date,
+    ForeignKey, Text, Enum, JSON, Float
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -107,6 +107,11 @@ class Account(Base):
     # Additional config stored as JSON
     device_config = Column(JSON, nullable=True)
     notes = Column(Text, nullable=True)
+    
+    # Per-account scheduling (v2.0)
+    schedule_enabled = Column(Boolean, default=False)   # Master toggle for daily pipeline
+    schedule_warmup = Column(Boolean, default=True)     # Include in warmup phase
+    schedule_posting = Column(Boolean, default=True)    # Include in posting phase
 
 
 class Video(Base):
@@ -212,18 +217,52 @@ class ScheduleConfig(Base):
     __tablename__ = "schedule_config"
     
     id = Column(Integer, primary_key=True, index=True)
-    key = Column(String(50), unique=True, nullable=False, default="main")  # Config identifier
+    key = Column(String(50), unique=True, nullable=False, default="main")
     
     # Scheduling State
     enabled = Column(Boolean, default=False)
-    phone_ids = Column(JSON, default=[])  # List of GeeLark phone IDs to schedule
+    phone_ids = Column(JSON, default=[])  # Legacy — v2.0 uses per-account scheduling
     
     # Configuration
     posts_per_phone = Column(Integer, default=3)
     enable_warmup = Column(Boolean, default=True)
     auto_delete = Column(Boolean, default=True)
     
+    # Pipeline timing (EST hours, stored as integers)
+    warmup_hour_est = Column(Integer, default=8)       # 8 AM EST
+    video_gen_hour_est = Column(Integer, default=9)    # 9 AM EST
+    posting_hours_est = Column(String(50), default="10,13,17")  # 10 AM, 1 PM, 5 PM EST
+    
     # Timestamps
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+class PipelineLog(Base):
+    """
+    Log every automated pipeline action for monitoring.
+    Tracks warmup, video generation, and posting phases.
+    """
+    __tablename__ = "pipeline_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Pipeline info
+    pipeline_date = Column(Date, nullable=False)   # The date this pipeline ran
+    phase = Column(String(30), nullable=False)      # warmup, video_gen, posting
+    
+    # Target
+    phone_id = Column(String(100), nullable=True)   # GeeLark phone ID
+    account_name = Column(String(255), nullable=True)  # Human-readable name
+    
+    # Status
+    status = Column(String(20), nullable=False, default="started")  # started, completed, failed, skipped
+    
+    # Details
+    details = Column(JSON, nullable=True)           # Phase-specific data
+    error_message = Column(Text, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    
+    # Timestamps
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)

@@ -1,1897 +1,997 @@
 """
-TikTok Automation Dashboard
-===========================
-Streamlit-based dashboard for managing TikTok account automation.
+TikTok Automation Dashboard v2.0
+================================
+Streamlit dashboard with modern design, pipeline management, and account scheduling.
 """
 
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime
 import os
+from datetime import datetime, timedelta
 
-# Configuration - Use Render API URL as default
-API_BASE_URL = os.getenv("API_BASE_URL", "https://tiktok-automation-api-4o6b.onrender.com/api")
+# ===========================
+# Configuration
+# ===========================
+
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api")
 
 st.set_page_config(
     page_title="TikTok Automation",
-    page_icon="📱",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS - Premium Dark Mode with High Contrast Text
+
+# ===========================
+# Custom CSS — Modern Dark Theme
+# ===========================
+
 st.markdown("""
 <style>
-    /* Premium Dark Theme with Readable Text */
+    /* Import Google Font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    /* Global */
     .stApp {
-        background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
-        color: #ffffff !important;
+        font-family: 'Inter', sans-serif;
     }
     
-    /* Force all text to be white/light */
-    .stApp, .stApp p, .stApp span, .stApp div, .stApp label, 
-    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
-    .stMarkdown, .stMarkdown p, .stText, [data-testid="stMarkdownContainer"] {
-        color: #ffffff !important;
-    }
-    
-    /* Sidebar text */
-    [data-testid="stSidebar"], [data-testid="stSidebar"] * {
-        color: #ffffff !important;
-    }
-    
+    /* Sidebar */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+        background: linear-gradient(180deg, #0f0f23 0%, #1a1a3e 100%);
+    }
+    [data-testid="stSidebar"] .stMarkdown h1 {
+        color: #e0e0ff;
+        font-size: 1.4rem;
+        font-weight: 700;
     }
     
-    /* Make sidebar collapse button visible */
-    [data-testid="collapsedControl"] {
-        color: white !important;
-        background: #6366f1 !important;
-        border-radius: 8px !important;
-    }
-    
-    button[kind="headerNoPadding"] {
-        color: white !important;
-    }
-    
-    .stMetric {
-        background: linear-gradient(145deg, #1e1e3f, #252550);
-        padding: 20px;
+    /* Cards */
+    .metric-card {
+        background: linear-gradient(135deg, #1e1e3f 0%, #2a2a5a 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 16px;
-        border: 1px solid rgba(255,255,255,0.2);
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        padding: 20px 24px;
+        margin-bottom: 12px;
+    }
+    .metric-card h3 {
+        color: #a0a0c0;
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin: 0 0 8px 0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .metric-card .value {
+        color: #ffffff;
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1.1;
+    }
+    .metric-card .sub {
+        color: #8080b0;
+        font-size: 0.8rem;
+        margin-top: 4px;
     }
     
-    .stMetric label, .stMetric [data-testid="stMetricValue"], 
-    .stMetric [data-testid="stMetricLabel"] {
-        color: #ffffff !important;
-    }
-    
-    .magic-card {
-        background: linear-gradient(145deg, #1a1a3e, #252560);
-        padding: 30px;
+    /* Status badges */
+    .badge {
+        display: inline-block;
+        padding: 4px 12px;
         border-radius: 20px;
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        box-shadow: 0 8px 32px rgba(99, 102, 241, 0.15);
-        margin: 20px 0;
-        color: #ffffff !important;
-    }
-    
-    .magic-card h3, .magic-card ol, .magic-card li {
-        color: #ffffff !important;
-    }
-    
-    .magic-card strong {
-        color: #a5b4fc !important;
-    }
-    
-    /* Input fields */
-    .stTextInput input, .stSelectbox select, .stTextArea textarea {
-        background-color: #252550 !important;
-        color: #ffffff !important;
-        border: 1px solid rgba(255,255,255,0.2) !important;
-    }
-    
-    .stTextInput label, .stSelectbox label, .stTextArea label {
-        color: #ffffff !important;
-    }
-    
-    /* Dataframes/Tables */
-    .stDataFrame, .stTable {
-        color: #ffffff !important;
-    }
-    
-    [data-testid="stDataFrame"] {
-        background: #1a1a3e;
-    }
-    
-    /* Status colors */
-    .status-active { color: #00ff88 !important; font-weight: bold; }
-    .status-warming { color: #ffc107 !important; font-weight: bold; }
-    .status-banned { color: #ff4757 !important; font-weight: bold; }
-    .status-paused { color: #a0a0a0 !important; font-weight: bold; }
-    
-    /* Dropdown/Selectbox text visibility */
-    .stSelectbox > div > div > div > div {
-        color: #ffffff !important;
-    }
-    
-    .stSelectbox [data-baseweb="select"] > div {
-        background-color: #252550 !important;
-        color: #ffffff !important;
-    }
-    
-    /* Button styling */
-    .stButton > button {
-        background: linear-gradient(90deg, #6366f1, #8b5cf6) !important;
-        color: #ffffff !important;
-        border: none;
-        border-radius: 12px;
-        padding: 12px 24px;
+        font-size: 0.75rem;
         font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+    .badge-green { background: rgba(76, 175, 80, 0.2); color: #66bb6a; }
+    .badge-yellow { background: rgba(255, 193, 7, 0.2); color: #ffd54f; }
+    .badge-red { background: rgba(244, 67, 54, 0.2); color: #ef5350; }
+    .badge-blue { background: rgba(33, 150, 243, 0.2); color: #42a5f5; }
+    .badge-gray { background: rgba(158, 158, 158, 0.2); color: #bdbdbd; }
+    
+    /* Pipeline status card */
+    .pipeline-card {
+        background: linear-gradient(135deg, #1a1a40 0%, #252560 100%);
+        border: 1px solid rgba(100, 100, 255, 0.15);
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 16px;
+    }
+    .pipeline-card h2 {
+        color: #c0c0ff;
+        font-size: 1.1rem;
+        margin: 0 0 16px 0;
     }
     
-    .stButton > button:hover {
-        background: linear-gradient(90deg, #8b5cf6, #a855f7) !important;
-        transform: translateY(-2px);
+    /* Phase indicators */
+    .phase-row {
+        display: flex;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .phase-row:last-child { border-bottom: none; }
+    .phase-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        margin-right: 16px;
+    }
+    .phase-icon.warmup { background: rgba(255, 152, 0, 0.15); }
+    .phase-icon.vidgen { background: rgba(156, 39, 176, 0.15); }
+    .phase-icon.posting { background: rgba(0, 188, 212, 0.15); }
+    
+    /* Log table */
+    .log-entry {
+        display: flex;
+        align-items: center;
+        padding: 10px 16px;
+        border-radius: 10px;
+        margin-bottom: 6px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.05);
     }
     
-    /* Success/Error/Warning messages */
-    .stSuccess, .stError, .stWarning, .stInfo {
-        color: #ffffff !important;
+    /* Account row */
+    .account-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 20px;
+        border-radius: 12px;
+        margin-bottom: 8px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        transition: background 0.2s;
+    }
+    .account-row:hover {
+        background: rgba(255, 255, 255, 0.06);
     }
     
-    /* Radio buttons */
-    .stRadio label {
-        color: #ffffff !important;
+    /* Buttons */
+    .stButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+        font-family: 'Inter', sans-serif;
+        transition: all 0.2s;
     }
     
-    /* Tabs */
+    /* Section headers */
+    .section-header {
+        color: #e0e0ff;
+        font-size: 1.3rem;
+        font-weight: 700;
+        margin: 24px 0 16px 0;
+        padding-bottom: 8px;
+        border-bottom: 2px solid rgba(100, 100, 255, 0.2);
+    }
+    
+    /* Hide streamlit branding */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 4px;
+    }
     .stTabs [data-baseweb="tab"] {
-        color: #ffffff !important;
-    }
-    
-    /* Expander */
-    .streamlit-expanderHeader {
-        color: #ffffff !important;
-    }
-    
-    /* ===== MOBILE RESPONSIVE STYLES ===== */
-    @media (max-width: 768px) {
-        /* Fix sidebar for iOS - proper sizing and touch targets */
-        [data-testid="stSidebar"] {
-            width: 280px !important;
-            min-width: 280px !important;
-            max-width: 280px !important;
-        }
-        
-        /* Make sidebar nav items touch-friendly */
-        [data-testid="stSidebar"] .stRadio > div {
-            gap: 8px !important;
-        }
-        
-        [data-testid="stSidebar"] .stRadio label {
-            padding: 14px 16px !important;
-            min-height: 48px !important;
-            font-size: 16px !important;
-            display: flex !important;
-            align-items: center !important;
-            margin-bottom: 4px !important;
-            border-radius: 8px !important;
-            background: rgba(255,255,255,0.05) !important;
-        }
-        
-        [data-testid="stSidebar"] .stRadio label:active {
-            background: rgba(99, 102, 241, 0.3) !important;
-        }
-        
-        /* Larger buttons for touch */
-        .stButton > button {
-            padding: 16px 24px !important;
-            font-size: 16px !important;
-            min-height: 52px !important;
-            width: 100% !important;
-            -webkit-tap-highlight-color: transparent;
-        }
-        
-        /* Full-width inputs */
-        .stTextInput, .stSelectbox, .stMultiSelect, .stNumberInput {
-            width: 100% !important;
-        }
-        
-        /* Stack columns vertically */
-        [data-testid="column"] {
-            width: 100% !important;
-            flex: 100% !important;
-            min-width: 100% !important;
-        }
-        
-        /* Larger touch targets for multiselect */
-        .stMultiSelect [data-baseweb="tag"] {
-            padding: 10px 14px !important;
-            font-size: 15px !important;
-            min-height: 40px !important;
-        }
-        
-        /* Make multiselect dropdown items bigger */
-        [data-baseweb="popover"] li {
-            padding: 14px 16px !important;
-            min-height: 48px !important;
-        }
-        
-        /* Bigger text for readability */
-        .stMarkdown p, .stText {
-            font-size: 16px !important;
-        }
-        
-        /* Make metrics stack nicely */
-        .stMetric {
-            padding: 15px !important;
-            margin-bottom: 10px !important;
-        }
-        
-        /* Full-width progress bar */
-        .stProgress {
-            width: 100% !important;
-        }
-        
-        /* Tabs - bigger touch targets */
-        .stTabs [data-baseweb="tab"] {
-            padding: 12px 16px !important;
-            font-size: 14px !important;
-            min-height: 44px !important;
-        }
-        
-        /* Form submit buttons full width */
-        [data-testid="stFormSubmitButton"] button {
-            width: 100% !important;
-            min-height: 52px !important;
-        }
+        border-radius: 10px 10px 0 0;
+        font-weight: 500;
     }
 </style>
-
 """, unsafe_allow_html=True)
 
 
 # ===========================
-# API Helper Functions
+# API Helpers
 # ===========================
 
-def api_get(endpoint: str):
-    """Make GET request to API."""
+def api_get(endpoint):
+    """GET request to API."""
     try:
-        response = requests.get(f"{API_BASE_URL}{endpoint}", timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"API Error: {e}")
-        return None
-
-
-def api_post(endpoint: str, data: dict = None, long_timeout: bool = False):
-    """Make POST request to API. Use long_timeout=True for video generation."""
-    try:
-        # Video generation can take 5+ minutes
-        timeout = 600 if long_timeout else 30
-        response = requests.post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=timeout)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"API Error: {e}")
-        return None
-
-
-def api_delete(endpoint: str):
-    """Make DELETE request to API."""
-    try:
-        response = requests.delete(f"{API_BASE_URL}{endpoint}", timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"API Error: {e}")
-        return None
-
-
-def api_post_long(endpoint: str, data: dict = None):
-    """Make POST request with extended timeout for long-running operations like Magic Setup."""
-    full_url = f"{API_BASE_URL}{endpoint}"
-    try:
-        # 5-minute timeout for operations like phone creation + TikTok install + account creation
-        st.write(f"🔗 Calling: `{full_url}`")  # Debug output
-        response = requests.post(full_url, json=data or {}, timeout=300)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.Timeout:
-        st.error("⏳ Operation is taking longer than expected. Check the 📊 Logs page for progress.")
-        return None
-    except requests.exceptions.ConnectionError as e:
-        st.error(f"🔌 Connection Error to {full_url}: {e}")
+        resp = requests.get(f"{API_BASE_URL}{endpoint}", timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
         return None
     except Exception as e:
-        st.error(f"API Error calling {full_url}: {type(e).__name__}: {e}")
         return None
 
+def api_post(endpoint, data=None):
+    """POST request to API."""
+    try:
+        resp = requests.post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+        return None
+    except Exception as e:
+        return None
+
+def api_delete(endpoint):
+    """DELETE request to API."""
+    try:
+        resp = requests.delete(f"{API_BASE_URL}{endpoint}", timeout=10)
+        if resp.status_code == 200:
+            return resp.json()
+        return None
+    except Exception as e:
+        return None
+
+
+def status_badge(status):
+    """Return HTML badge for a status string."""
+    color_map = {
+        "completed": "green", "success": "green", "active": "green",
+        "started": "yellow", "running": "yellow", "warming_up": "yellow",
+        "failed": "red", "error": "red", "banned": "red",
+        "skipped": "gray", "created": "blue", "paused": "gray",
+    }
+    color = color_map.get(status, "gray")
+    return f'<span class="badge badge-{color}">{status}</span>'
+
+
+def format_time_ago(iso_str):
+    """Format an ISO timestamp as relative time."""
+    if not iso_str:
+        return "Never"
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        diff = datetime.utcnow() - dt.replace(tzinfo=None)
+        if diff.total_seconds() < 60:
+            return "Just now"
+        elif diff.total_seconds() < 3600:
+            return f"{int(diff.total_seconds() / 60)}m ago"
+        elif diff.total_seconds() < 86400:
+            return f"{int(diff.total_seconds() / 3600)}h ago"
+        else:
+            return f"{int(diff.total_seconds() / 86400)}d ago"
+    except Exception:
+        return str(iso_str)[:16]
 
 
 # ===========================
 # Sidebar Navigation
 # ===========================
 
-st.sidebar.title("📱 TikTok Automation")
+st.sidebar.markdown("# 🚀 TikTok Automation")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Navigation",
-    ["🏠 Dashboard", "✨ Magic Setup", "👤 Accounts", "🔐 Credentials", "🔄 Warmup", "🎬 Videos", "🌐 Proxies", "📊 Logs", "⚙️ GeeLark"]
+    ["📊 Dashboard", "⚡ Pipeline", "👤 Accounts", "🎬 Videos", "⚙️ GeeLark"],
+    label_visibility="collapsed"
 )
 
-# Version footer - update on each deploy
 st.sidebar.markdown("---")
-st.sidebar.caption(f"v1.9.0 | API: {API_BASE_URL[:40]}...")
+st.sidebar.caption(f"v2.0.0 | API: {API_BASE_URL[:35]}...")
+st.sidebar.caption("Built for automation 🤖")
 
 
 # ===========================
-# Dashboard Page
+# PAGE: Dashboard
 # ===========================
 
-if page == "🏠 Dashboard":
-    st.title("Dashboard")
+if page == "📊 Dashboard":
+    st.markdown("## 📊 Dashboard")
+    st.caption("System overview and pipeline health")
     
-    # Get stats
-    stats = api_get("/dashboard/stats")
+    # Fetch data
+    pipeline_status = api_get("/pipeline/status")
+    health = api_get("/health")
     
-    if stats:
-        # Metrics row
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
-        with col1:
-            st.metric("Total Accounts", stats["total_accounts"])
-        with col2:
-            st.metric("Warming Up", stats["warming_up"], delta=None)
-        with col3:
-            st.metric("Active", stats["active"])
-        with col4:
-            st.metric("Posting", stats["posting"])
-        with col5:
-            st.metric("Banned", stats["banned"], delta_color="inverse")
-        
-        st.markdown("---")
-        
-        # Second row
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Available Proxies", stats["available_proxies"])
-        with col2:
-            st.metric("Total Videos", stats["total_videos"])
-        with col3:
-            st.metric("Unposted Videos", stats["unposted_videos"])
-        with col4:
-            st.metric("Tasks Today", stats["tasks_today"])
+    # Row 1: Quick stats
+    col1, col2, col3, col4 = st.columns(4)
     
-    st.markdown("---")
+    with col1:
+        scheduled = pipeline_status.get("scheduled_accounts", {}).get("total", 0) if pipeline_status else 0
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>📱 Scheduled Accounts</h3>
+            <div class="value">{scheduled}</div>
+            <div class="sub">Active in pipeline</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        enabled = pipeline_status.get("pipeline_enabled", False) if pipeline_status else False
+        status_text = "ACTIVE" if enabled else "DISABLED"
+        status_color = "#66bb6a" if enabled else "#ef5350"
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>⚡ Pipeline</h3>
+            <div class="value" style="color: {status_color}">{status_text}</div>
+            <div class="sub">Master switch</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        warmup_ct = pipeline_status.get("scheduled_accounts", {}).get("warmup", 0) if pipeline_status else 0
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>🔥 Warmup</h3>
+            <div class="value">{warmup_ct}</div>
+            <div class="sub">Accounts warming</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        posting_ct = pipeline_status.get("scheduled_accounts", {}).get("posting", 0) if pipeline_status else 0
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>📤 Posting</h3>
+            <div class="value">{posting_ct}</div>
+            <div class="sub">Accounts posting</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Row 2: Today's Pipeline Status
+    st.markdown("### ⏱️ Today's Pipeline")
+    
+    if pipeline_status:
+        today = pipeline_status.get("today", {})
+        config = pipeline_status.get("config", {})
+        
+        phases = [
+            ("🔥", "Warmup", "warmup", f"{config.get('warmup_hour_est', 8)}:00 AM EST"),
+            ("🎬", "Video Generation", "video_gen", f"{config.get('video_gen_hour_est', 9)}:00 AM EST"),
+            ("📤", "Posting", "posting", f"{config.get('posting_hours_est', '10,13,17')} EST"),
+        ]
+        
+        cols = st.columns(3)
+        for i, (icon, name, key, schedule_time) in enumerate(phases):
+            with cols[i]:
+                phase_data = today.get(key, {})
+                phase_status = phase_data.get("status", "pending")
+                
+                if phase_status == "completed":
+                    color = "#66bb6a"
+                    bg = "rgba(76, 175, 80, 0.1)"
+                elif phase_status == "started":
+                    color = "#ffd54f"
+                    bg = "rgba(255, 193, 7, 0.1)"
+                elif phase_status == "failed":
+                    color = "#ef5350"
+                    bg = "rgba(244, 67, 54, 0.1)"
+                else:
+                    color = "#8080b0"
+                    bg = "rgba(128, 128, 176, 0.05)"
+                
+                st.markdown(f"""
+                <div style="background: {bg}; border: 1px solid {color}30; border-radius: 14px; padding: 20px; text-align: center;">
+                    <div style="font-size: 2rem; margin-bottom: 8px;">{icon}</div>
+                    <div style="color: #e0e0ff; font-weight: 600; font-size: 1rem;">{name}</div>
+                    <div style="color: {color}; font-weight: 700; font-size: 0.85rem; margin-top: 6px; text-transform: uppercase;">{phase_status}</div>
+                    <div style="color: #8080b0; font-size: 0.75rem; margin-top: 4px;">📅 {schedule_time}</div>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # Row 3: Recent Pipeline Activity
+    st.markdown("### 📋 Recent Activity")
+    
+    logs_data = api_get("/pipeline/logs?days=3")
+    if logs_data and logs_data.get("logs"):
+        logs = logs_data["logs"][:15]  # Last 15 entries
+        
+        for log in logs:
+            phase_icons = {"warmup": "🔥", "video_gen": "🎬", "posting": "📤"}
+            icon = phase_icons.get(log["phase"], "📝")
+            phase_name = log["phase"].replace("_", " ").title()
+            badge = status_badge(log["status"])
+            account = log.get("account_name") or ""
+            time_str = format_time_ago(log.get("started_at"))
+            duration = f" · {log['duration_seconds']:.0f}s" if log.get("duration_seconds") else ""
+            error = f" — {log['error'][:60]}" if log.get("error") else ""
+            
+            st.markdown(f"""
+            <div class="log-entry">
+                <span style="font-size: 1.3rem; margin-right: 12px;">{icon}</span>
+                <span style="color: #e0e0ff; font-weight: 500; min-width: 140px;">{phase_name}</span>
+                {badge}
+                <span style="color: #a0a0c0; margin-left: 12px; flex: 1;">{account}{error}</span>
+                <span style="color: #8080b0; font-size: 0.8rem;">{time_str}{duration}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No pipeline activity yet. Enable the pipeline and schedule some accounts to get started!")
     
     # Health check
-    st.subheader("System Health")
-    health = api_get("/health")
+    st.markdown("### 🏥 System Health")
     if health:
         col1, col2 = st.columns(2)
         with col1:
-            st.write(f"**Status:** {health['status']}")
-            st.write(f"**GeeLark Connected:** {'✅' if health['geelark_connected'] else '❌'}")
+            gl_status = "✅ Connected" if health.get("geelark_connected") else "❌ Disconnected"
+            st.markdown(f"**GeeLark API:** {gl_status}")
+            st.markdown(f"**Database:** ✅ Connected")
         with col2:
-            st.write(f"**Database Connected:** {'✅' if health['database_connected'] else '❌'}")
-            st.write(f"**Last Check:** {health['timestamp'][:19]}")
-
-
-# ===========================
-# Magic Setup Page
-# ===========================
-
-elif page == "✨ Magic Setup":
-    st.title("✨ Magic Setup")
-    st.markdown("**Zero-touch automation**: Paste a proxy → Get a warmed TikTok account")
-    
-    st.markdown("""
-    <div class="magic-card">
-        <h3>🚀 What happens when you click "Launch":</h3>
-        <ol>
-            <li>Creates an <strong>Android 15</strong> cloud phone with your proxy</li>
-            <li>Installs <strong>TikTok</strong> from the official app store</li>
-            <li>Creates a <strong>new TikTok account</strong> with natural credentials</li>
-            <li>Stores credentials <strong>securely encrypted</strong></li>
-            <li>Starts the <strong>5-day warmup process</strong></li>
-        </ol>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    setup_tab1, setup_tab2 = st.tabs(["🔧 Single Setup", "📦 Batch Setup"])
-    
-    with setup_tab1:
-        # Simple form - no complex session state
-        with st.form("magic_setup_form"):
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                proxy_string = st.text_input(
-                    "🌐 Proxy String",
-                    placeholder="socks5://user:pass@1.2.3.4:1337  or  host:port:user:pass",
-                    help="Supports multiple formats: protocol://user:pass@host:port or host:port:user:pass"
-                )
-            
-            with col2:
-                name_prefix = st.text_input("Name Prefix (optional)", placeholder="MyBrand")
-            
-            # Submit button inside form - guaranteed to work
-            submitted = st.form_submit_button("🚀 Launch Magic Setup", type="primary", use_container_width=True)
-            
-            if submitted:
-                if not proxy_string:
-                    st.warning("⚠️ Please enter a proxy string")
-                else:
-                    st.info("🔄 Starting Magic Setup... (this may take 2-5 minutes)")
-                    
-                    # Start async task - use long timeout for cold starts
-                    result = api_post_long("/accounts/full-setup-async", {
-                        "proxy_string": proxy_string,
-                        "name_prefix": name_prefix or "",
-                        "max_retries": 5
-                    })
-                    
-                    if result and result.get("task_id"):
-                        task_id = result["task_id"]
-                        st.success(f"✅ Task started! ID: `{task_id}`")
-                        st.markdown(f"👉 **[Check progress in Logs tab](#)** or wait here...")
-                        
-                        # Poll for completion
-                        import time
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        for i in range(120):  # Max 10 minutes (120 * 5 seconds)
-                            time.sleep(5)
-                            task_status = api_get(f"/tasks/{task_id}")
-                            
-                            if task_status:
-                                # Robust progress parsing - handle various formats
-                                progress_val = task_status.get("progress", 0)
-                                try:
-                                    progress = int(progress_val) if progress_val is not None else 0
-                                except (ValueError, TypeError):
-                                    progress = 0  # Default if not a valid number
-                                
-                                current_step = task_status.get("current_step", "Working...")
-                                status = task_status.get("status", "running")
-                                
-                                progress_bar.progress(max(0, min(progress, 100)) / 100)
-                                status_text.markdown(f"**{status.upper()}**: {current_step}")
-                                
-                                if status == "complete":
-                                    st.balloons()
-                                    res = task_status.get("result", {})
-                                    st.success(f"""
-                                    🎉 **Account Created!**
-                                    - Account ID: `{res.get('account_id')}`
-                                    - Phone ID: `{res.get('phone_id')}`
-                                    """)
-                                    if res.get("credentials"):
-                                        creds = res["credentials"]
-                                        st.info(f"""
-                                        **Credentials**: `{creds.get('username')}` / `{creds.get('email')}` / `{creds.get('password')}`
-                                        """)
-                                    break
-                                
-                                elif status == "failed":
-                                    st.error(f"❌ Failed: {task_status.get('error')}")
-                                    break
-                            else:
-                                status_text.warning("Waiting for task status...")
-                        else:
-                            st.warning("⏰ Task taking too long. Check Logs tab for status.")
-                    
-                    elif result:
-                        st.error(f"Error starting task: {result}")
-                    else:
-                        st.error("Failed to connect to API")
-    
-    with setup_tab2:
-        st.markdown("**Paste multiple proxies** (one per line) to create accounts in bulk.")
-        st.markdown("✅ New accounts **auto-enroll** into the daily warmup & posting schedule.")
-        
-        with st.form("batch_setup_form"):
-            proxy_text = st.text_area(
-                "🌐 Proxies (one per line)",
-                height=200,
-                placeholder="socks5://user:pass@1.2.3.4:1337\nsocks5://user:pass@5.6.7.8:1337\nhost:port:user:pass",
-                help="Each line = one proxy = one TikTok account"
-            )
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                batch_prefix = st.text_input("Name Prefix", value="tiktok", key="batch_prefix")
-            with col2:
-                auto_enroll = st.checkbox("Auto-enroll in scheduler", value=True, help="Add new accounts to daily warmup & posting automatically")
-            
-            batch_submitted = st.form_submit_button("🚀 Launch Batch Setup", type="primary", use_container_width=True)
-            
-            if batch_submitted:
-                proxies = [p.strip() for p in proxy_text.strip().split("\n") if p.strip()]
-                
-                if not proxies:
-                    st.warning("⚠️ Please paste at least one proxy")
-                else:
-                    st.info(f"🔄 Starting batch setup for **{len(proxies)}** proxies...")
-                    
-                    result = api_post_long("/magic-setup/batch", {
-                        "proxies": proxies,
-                        "name_prefix": batch_prefix,
-                        "max_retries": 3,
-                        "auto_enroll": auto_enroll
-                    })
-                    
-                    if result and result.get("batch_id"):
-                        batch_id = result["batch_id"]
-                        st.success(f"✅ Batch started! ID: `{batch_id}`")
-                        
-                        import time
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        results_area = st.empty()
-                        
-                        for poll in range(360):  # 30 min max (360 * 5s)
-                            time.sleep(5)
-                            batch_status = api_get(f"/magic-setup/batch/{batch_id}")
-                            
-                            if batch_status and "error" not in batch_status:
-                                total = batch_status.get("total", 1)
-                                current = batch_status.get("current_proxy", 0)
-                                successful = batch_status.get("successful", 0)
-                                failed = batch_status.get("failed", 0)
-                                status = batch_status.get("status", "running")
-                                message = batch_status.get("message", "Processing...")
-                                
-                                progress_bar.progress(min((successful + failed) / total, 0.95))
-                                status_text.markdown(f"📊 **{message}** | ✅ {successful} | ❌ {failed}")
-                                
-                                # Show results so far
-                                results = batch_status.get("results", [])
-                                if results:
-                                    with results_area.container():
-                                        for r in results:
-                                            if r.get("success"):
-                                                st.write(f"✅ {r.get('proxy')} → Phone: `{r.get('phone_id', 'N/A')[:8]}...`")
-                                            else:
-                                                st.write(f"❌ {r.get('proxy')}: {r.get('error', 'Unknown')}")
-                                
-                                if status == "completed":
-                                    progress_bar.progress(1.0)
-                                    if successful > 0:
-                                        st.balloons()
-                                        st.success(f"🎉 Batch complete! {successful}/{total} accounts created & enrolled")
-                                    if failed > 0:
-                                        st.warning(f"⚠️ {failed} proxies failed")
-                                    break
-                            else:
-                                status_text.warning("Checking status...")
-                        else:
-                            st.warning("⏰ Batch still running. Check Render logs for progress.")
-                    else:
-                        st.error("Failed to start batch setup")
-    
-    st.markdown("---")
-    st.caption("💡 Tip: Use static residential proxies for best results. Each proxy should be unique.")
-
-
-# ===========================
-# Credentials Page
-# ===========================
-
-elif page == "🔐 Credentials":
-    st.title("🔐 Secure Credentials Vault")
-    st.markdown("View all stored TikTok account credentials")
-    
-    st.warning("⚠️ **Security Notice**: These are decrypted credentials. Handle with care.")
-    
-    credentials = api_get("/credentials")
-    
-    if credentials:
-        # Create DataFrame
-        df = pd.DataFrame([{
-            "Account ID": c["account_id"],
-            "Username": c["username"],
-            "Email": c["email"],
-            "Password": c["password"],
-            "Phone ID": c.get("phone_id", "N/A"),
-            "Created": c.get("created_at", "")[:19] if c.get("created_at") else ""
-        } for c in credentials])
-        
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Export button
-        if st.button("📥 Export as CSV"):
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name="tiktok_credentials.csv",
-                mime="text/csv"
-            )
+            st.markdown(f"**Scheduler:** ✅ Active" if health.get("scheduler_active", True) else "**Scheduler:** ❌ Inactive")
+            st.markdown(f"**Version:** v2.0.0")
     else:
-        st.info("No credentials stored yet. Use Magic Setup to create accounts!")
+        st.error("Cannot reach API backend")
 
 
 # ===========================
-# Accounts Page
+# PAGE: Pipeline
+# ===========================
+
+elif page == "⚡ Pipeline":
+    st.markdown("## ⚡ Pipeline Control")
+    st.caption("Configure and monitor the automated daily pipeline")
+    
+    # Fetch current config
+    config_resp = api_get("/schedule/config")
+    pipeline_status = api_get("/pipeline/status")
+    
+    # Master toggle
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### Master Pipeline Switch")
+        st.caption("When enabled, the pipeline runs automatically every day at the configured times.")
+    with col2:
+        current_enabled = config_resp.get("enabled", False) if config_resp else False
+        new_enabled = st.toggle("Pipeline Active", value=current_enabled, key="pipeline_toggle")
+        if new_enabled != current_enabled:
+            result = api_post("/schedule/config", {"enabled": new_enabled})
+            if result:
+                st.rerun()
+    
+    st.markdown("---")
+    
+    # Schedule Configuration
+    st.markdown("### ⏰ Schedule Settings (EST)")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        warmup_hour = st.number_input(
+            "Warmup Hour (EST)",
+            min_value=1, max_value=23,
+            value=config_resp.get("warmup_hour_est", 8) if config_resp else 8,
+            help="Hour in EST when warmup starts"
+        )
+    
+    with col2:
+        vidgen_hour = st.number_input(
+            "Video Gen Hour (EST)",
+            min_value=1, max_value=23,
+            value=config_resp.get("video_gen_hour_est", 9) if config_resp else 9,
+            help="Hour in EST when video generation starts"
+        )
+    
+    with col3:
+        posting_hours = st.text_input(
+            "Posting Hours (EST)",
+            value=config_resp.get("posting_hours_est", "10,13,17") if config_resp else "10,13,17",
+            help="Comma-separated hours in EST"
+        )
+    
+    with col4:
+        posts_per = st.number_input(
+            "Posts per Account",
+            min_value=1, max_value=10,
+            value=config_resp.get("posts_per_phone", 3) if config_resp else 3
+        )
+    
+    if st.button("💾 Save Schedule", use_container_width=True):
+        update_data = {
+            "warmup_hour_est": warmup_hour,
+            "video_gen_hour_est": vidgen_hour,
+            "posting_hours_est": posting_hours,
+            "posts_per_phone": posts_per,
+        }
+        result = api_post("/schedule/config", update_data)
+        if result:
+            st.success("Schedule saved! Changes take effect on next server restart.")
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Manual triggers
+    st.markdown("### 🎮 Manual Triggers")
+    st.caption("Trigger pipeline phases immediately (respects account scheduling)")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("🔥 Run Warmup Now", use_container_width=True, type="primary"):
+            result = api_post("/pipeline/trigger/warmup")
+            if result:
+                st.success("Warmup triggered! Check logs for progress.")
+            else:
+                st.error("Failed to trigger warmup")
+    with col2:
+        if st.button("🎬 Generate Videos Now", use_container_width=True, type="primary"):
+            result = api_post("/pipeline/trigger/video_gen")
+            if result:
+                st.success("Video generation triggered!")
+            else:
+                st.error("Failed to trigger video gen")
+    with col3:
+        if st.button("📤 Post Videos Now", use_container_width=True, type="primary"):
+            result = api_post("/pipeline/trigger/posting")
+            if result:
+                st.success("Posting triggered!")
+            else:
+                st.error("Failed to trigger posting")
+    
+    st.markdown("---")
+    
+    # Pipeline Logs
+    st.markdown("### 📋 Pipeline Activity Log")
+    
+    log_days = st.selectbox("Show logs from", [1, 3, 7, 14], index=1, format_func=lambda x: f"Last {x} day{'s' if x > 1 else ''}")
+    phase_filter = st.selectbox("Filter by phase", ["All", "warmup", "video_gen", "posting"], index=0)
+    
+    endpoint = f"/pipeline/logs?days={log_days}"
+    if phase_filter != "All":
+        endpoint += f"&phase={phase_filter}"
+    
+    logs_data = api_get(endpoint)
+    
+    if logs_data and logs_data.get("logs"):
+        logs = logs_data["logs"]
+        
+        # Convert to DataFrame for nice display
+        df_data = []
+        for log in logs:
+            phase_icons = {"warmup": "🔥", "video_gen": "🎬", "posting": "📤"}
+            df_data.append({
+                "Phase": f"{phase_icons.get(log['phase'], '📝')} {log['phase'].replace('_', ' ').title()}",
+                "Status": log["status"].upper(),
+                "Account": log.get("account_name") or "—",
+                "Duration": f"{log['duration_seconds']:.0f}s" if log.get("duration_seconds") else "—",
+                "Error": (log.get("error") or "")[:50],
+                "Time": format_time_ago(log.get("started_at")),
+            })
+        
+        df = pd.DataFrame(df_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.caption(f"Showing {len(logs)} entries")
+    else:
+        st.info("No pipeline logs yet. Trigger a phase or wait for the automatic schedule.")
+
+
+# ===========================
+# PAGE: Accounts
 # ===========================
 
 elif page == "👤 Accounts":
-    st.title("Account Management")
+    st.markdown("## 👤 Account Management")
+    st.caption("Manage accounts and their scheduling status")
     
-    # Tabs
-    tab1, tab2 = st.tabs(["📋 Account List", "➕ Create Accounts"])
+    tab1, tab2, tab3 = st.tabs(["📋 Account List", "➕ Add Account", "🔐 Credentials"])
     
     with tab1:
-        # Filters
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            status_filter = st.selectbox(
-                "Filter by Status",
-                ["All", "created", "warming_up", "active", "posting", "paused", "banned"]
-            )
+        st.markdown("### Scheduled Accounts")
+        st.caption("Toggle scheduling on/off for each account. Scheduled accounts are included in the daily pipeline.")
         
-        # Get accounts
-        endpoint = "/accounts"
-        if status_filter != "All":
-            endpoint += f"?status={status_filter}"
+        accounts_data = api_get("/accounts/scheduled")
         
-        accounts_data = api_get(endpoint)
-        
-        if accounts_data and accounts_data["items"]:
-            # Convert to DataFrame
-            df = pd.DataFrame([{
-                "ID": a["id"],
-                "Name": a.get("geelark_profile_name", "N/A"),
-                "Status": a["status"],
-                "Username": a.get("tiktok_username", "-"),
-                "📱 Phone": a.get("phone", "-"),  # HeroSMS number for manual reg
-                "Followers": a["followers_count"],
-                "Posts": a["posts_count"],
-                "Warmup Day": a["warmup_day"],
-                "Last Activity": a.get("last_activity", "-")
-            } for a in accounts_data["items"]])
+        if accounts_data and accounts_data.get("accounts"):
+            accounts = accounts_data["accounts"]
             
-            st.dataframe(df, use_container_width=True)
+            # Bulk actions
+            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+            with col1:
+                st.markdown(f"**{len(accounts)} accounts total** · "
+                           f"**{sum(1 for a in accounts if a.get('schedule_enabled'))} scheduled**")
+            with col2:
+                if st.button("✅ Schedule All"):
+                    all_ids = [a["id"] for a in accounts]
+                    api_post("/accounts/schedule/bulk", {"account_ids": all_ids, "enabled": True})
+                    st.rerun()
+            with col3:
+                if st.button("❌ Unschedule All"):
+                    all_ids = [a["id"] for a in accounts]
+                    api_post("/accounts/schedule/bulk", {"account_ids": all_ids, "enabled": False})
+                    st.rerun()
+            with col4:
+                if st.button("🔄 Refresh"):
+                    st.rerun()
             
             st.markdown("---")
             
-            # Quick actions
-            st.subheader("Quick Actions")
-            col1, col2, col3, col4, col5 = st.columns(5)
-            
-            with col1:
-                account_id = st.number_input("Account ID", min_value=1, step=1)
-            with col2:
-                if st.button("▶️ Start"):
-                    result = api_post(f"/accounts/{account_id}/start")
-                    if result:
-                        st.success("Phone started!")
-            with col3:
-                if st.button("⏹️ Stop"):
-                    result = api_post(f"/accounts/{account_id}/stop")
-                    if result:
-                        st.success("Phone stopped!")
-            with col4:
-                if st.button("📱 Install TikTok"):
-                    result = api_post(f"/accounts/{account_id}/install-tiktok")
-                    if result:
-                        st.success("TikTok installation started!")
-            with col5:
-                if st.button("🗑️ Delete", type="primary"):
-                    result = api_delete(f"/accounts/{account_id}")
-                    if result:
-                        st.success(f"Account {account_id} deleted!")
+            # Account table
+            for account in accounts:
+                col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 1, 1, 1, 1])
+                
+                with col1:
+                    name = account.get("name", "Unknown")
+                    username = account.get("tiktok_username")
+                    if username:
+                        st.markdown(f"**{name}** · @{username}")
+                    else:
+                        st.markdown(f"**{name}**")
+                
+                with col2:
+                    phone_id = account.get("phone_id", "")
+                    st.caption(f"📱 {phone_id[:12]}..." if phone_id else "No phone")
+                
+                with col3:
+                    status = account.get("status", "unknown")
+                    st.markdown(status_badge(status), unsafe_allow_html=True)
+                
+                with col4:
+                    # Schedule toggle
+                    is_scheduled = account.get("schedule_enabled", False)
+                    new_val = st.checkbox(
+                        "Sched", 
+                        value=is_scheduled, 
+                        key=f"sched_{account['id']}",
+                        label_visibility="collapsed"
+                    )
+                    if new_val != is_scheduled:
+                        api_post(f"/accounts/{account['id']}/schedule", {"enabled": new_val})
                         st.rerun()
+                
+                with col5:
+                    # Warmup sub-toggle (only if scheduled)
+                    if account.get("schedule_enabled"):
+                        warmup_val = st.checkbox(
+                            "W", value=account.get("schedule_warmup", True),
+                            key=f"warmup_{account['id']}", label_visibility="collapsed",
+                            help="Include in warmup"
+                        )
+                        if warmup_val != account.get("schedule_warmup", True):
+                            api_post(f"/accounts/{account['id']}/schedule", {"warmup": warmup_val})
+                            st.rerun()
+                    else:
+                        st.write("—")
+                
+                with col6:
+                    # Posting sub-toggle
+                    if account.get("schedule_enabled"):
+                        posting_val = st.checkbox(
+                            "P", value=account.get("schedule_posting", True),
+                            key=f"posting_{account['id']}", label_visibility="collapsed",
+                            help="Include in posting"
+                        )
+                        if posting_val != account.get("schedule_posting", True):
+                            api_post(f"/accounts/{account['id']}/schedule", {"posting": posting_val})
+                            st.rerun()
+                    else:
+                        st.write("—")
+                
+                st.markdown("", unsafe_allow_html=True)  # Spacer
+            
+            # Legend
+            st.markdown("---")
+            st.caption("Column headers: **Name** | **Phone ID** | **Status** | **Scheduled ✅** | **Warmup 🔥** | **Posting 📤**")
+        
         else:
-            st.info("No accounts found. Create some accounts to get started!")
+            st.info("No accounts found. Create accounts via Magic Setup or add them manually.")
     
     with tab2:
-        st.subheader("Create New Accounts")
+        st.markdown("### ➕ Add New Account")
         
-        with st.form("create_accounts"):
-            count = st.number_input("Number of Accounts", min_value=1, max_value=50, value=5)
-            name_prefix = st.text_input("Name Prefix", value="TikTok_Account")
+        with st.form("create_account"):
+            col1, col2 = st.columns(2)
+            with col1:
+                acct_name = st.text_input("Account Name", placeholder="e.g. TikTok_Account_01")
+                acct_email = st.text_input("Email", placeholder="optional")
+                acct_password = st.text_input("Password", type="password", placeholder="optional")
+            with col2:
+                acct_phone = st.text_input("Phone Number", placeholder="optional")
+                acct_phone_id = st.text_input("GeeLark Phone ID", placeholder="From GeeLark dashboard")
+                auto_schedule = st.checkbox("Auto-schedule for pipeline", value=True)
             
-            st.markdown("---")
-            st.write("**Credentials (Optional)**")
-            st.caption("Format: email,password - one per line")
-            credentials_text = st.text_area("Credentials", height=100)
-            
-            submitted = st.form_submit_button("Create Accounts")
-            
-            if submitted:
-                credentials = None
-                if credentials_text.strip():
-                    credentials = []
-                    for line in credentials_text.strip().split("\n"):
-                        parts = line.split(",")
-                        if len(parts) >= 2:
-                            credentials.append({
-                                "email": parts[0].strip(),
-                                "password": parts[1].strip()
+            if st.form_submit_button("Create Account", use_container_width=True, type="primary"):
+                if acct_name:
+                    result = api_post("/accounts", {
+                        "name": acct_name,
+                        "email": acct_email,
+                        "password": acct_password,
+                        "phone": acct_phone,
+                    })
+                    if result:
+                        # Set phone ID and scheduling if provided
+                        acct_id = result.get("id")
+                        if acct_id and acct_phone_id:
+                            # Update with phone ID
+                            api_post(f"/accounts/{acct_id}/update", {
+                                "geelark_profile_id": acct_phone_id
                             })
-                
-                result = api_post("/accounts/batch", {
-                    "count": count,
-                    "name_prefix": name_prefix,
-                    "credentials": credentials
-                })
-                
-                if result:
-                    st.success(f"Created {len(result)} accounts!")
-
-
-# ===========================
-# Warmup Page
-# ===========================
-
-elif page == "🔄 Warmup":
-    st.title("🔄 Warmup Automation")
-    st.caption("Warm up accounts with browsing, likes, and comments before posting")
-    
-    st.markdown("---")
-    
-    # ===== SCHEDULE DISPLAY =====
-    st.write("**📅 Warmup Schedule:**")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info("🧘 **Daily Warmup:** 8:00 AM EST")
-    with col2:
-        # Load schedule config to show if enabled
-        sched_config = api_get("/schedule/config")
-        if sched_config and sched_config.get("enabled") and sched_config.get("enable_warmup"):
-            st.success("✅ **Scheduling ENABLED**")
-        else:
-            st.warning("⏸️ Scheduling disabled - enable in Videos > Scheduled Posts")
-    
-    st.markdown("---")
-    
-    # ===== PHONE SELECTION =====
-    st.write("**📱 Select Phones for Warmup:**")
-    
-    phones_data = api_get("/geelark/phones")
-    available_phones = []
-    if phones_data and phones_data.get("items"):
-        available_phones = phones_data["items"]
-    
-    if available_phones:
-        phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in available_phones}
-        
-        selected_warmup_phones = st.multiselect(
-            "Phones",
-            options=list(phone_options.keys()),
-            help="Select phones to run warmup on",
-            key="warmup_phone_select"
-        )
-        
-        selected_phone_ids = [phone_options[name] for name in selected_warmup_phones]
-        
-        if not selected_warmup_phones:
-            st.caption("⚠️ Select at least one phone to run warmup")
-    else:
-        st.warning("⚠️ No phones available. Create phones in GeeLark first.")
-        selected_phone_ids = []
-    
-    st.markdown("---")
-    
-    # ===== ENHANCED WARMUP OPTIONS =====
-    st.write("**⚙️ Warmup Configuration:**")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        warmup_duration = st.slider(
-            "Duration (minutes)", 
-            min_value=10, max_value=60, value=30,
-            help="How long to browse TikTok during warmup"
-        )
-        
-        enable_likes = st.checkbox("👍 Enable Random Likes", value=True, help="Like videos during browsing")
-        like_probability = 30
-        if enable_likes:
-            like_probability = st.slider("Like Probability (%)", 10, 80, 30, key="warmup_like_prob")
-    
-    with col2:
-        keywords_input = st.text_input(
-            "🔍 Keywords (comma-separated)",
-            value="teamwork, motivation, fyp",
-            help="Keywords for targeted browsing"
-        )
-        keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
-        
-        enable_comments = st.checkbox("💬 Enable AI Comments", value=True, help="Post AI-generated comments")
-    
-    st.markdown("---")
-    
-    # ===== ACTIONS =====
-    st.write("**▶️ Manual Warmup:**")
-    
-    col1, col2, col3 = st.columns([2, 2, 2])
-    
-    with col1:
-        if st.button("🚀 Run Enhanced Warmup Now", type="primary", 
-                     disabled=not selected_phone_ids, use_container_width=True):
-            with st.spinner("Starting enhanced warmup..."):
-                result = api_post("/geelark/warmup/enhanced", {
-                    "phone_ids": selected_phone_ids,
-                    "duration_minutes": warmup_duration,
-                    "keywords": keywords,
-                    "enable_comments": enable_comments,
-                    "enable_likes": enable_likes,
-                    "like_probability": like_probability
-                })
-                
-                if result and result.get("success"):
-                    st.success(f"✅ Enhanced warmup started!")
-                    st.info(f"📋 Main Task ID: {result.get('main_task_id', 'N/A')}")
-                    if result.get("chained_tasks"):
-                        for task_name, task_id in result["chained_tasks"].items():
-                            st.caption(f"  • {task_name}: {task_id}")
+                        if acct_id and auto_schedule:
+                            api_post(f"/accounts/{acct_id}/schedule", {
+                                "enabled": True, "warmup": True, "posting": True
+                            })
+                        st.success(f"Account '{acct_name}' created!")
+                        st.rerun()
                 else:
-                    st.error(f"Failed: {result}")
+                    st.warning("Please enter an account name")
     
-    with col2:
-        if st.button("▶️ Basic Browse Only", disabled=not selected_phone_ids, use_container_width=True):
-            result = api_post("/geelark/warmup/run", {
-                "phone_ids": selected_phone_ids,
-                "duration_minutes": warmup_duration,
-                "action": "browse video"
-            })
-            if result and result.get("success"):
-                st.success("Basic warmup started!")
-            else:
-                st.error(f"Failed: {result}")
-    
-    with col3:
-        if st.button("🔄 Refresh", use_container_width=True, key="refresh_warmup"):
-            st.rerun()
-    
-    st.markdown("---")
-    
-    # ===== WARMUP LOGS =====
-    st.write("**📊 Recent Warmup Tasks:**")
-    
-    # Query recent warmup tasks from GeeLark
-    warmup_tasks = api_post("/geelark/tasks/query", {
-        "task_type": 2,  # AI warmup type
-        "page_size": 20,
-        "page": 1
-    })
-    
-    if warmup_tasks and warmup_tasks.get("items"):
-        tasks = warmup_tasks["items"]
+    with tab3:
+        st.markdown("### 🔐 Stored Credentials")
         
-        status_map = {0: "⏳ Pending", 1: "🔄 Running", 2: "✅ Success", 3: "❌ Failed", 4: "⏹️ Stopped"}
-        
-        df = pd.DataFrame([{
-            "Phone": t.get("serialName", "N/A"),
-            "Status": status_map.get(t.get("status"), "Unknown"),
-            "Duration": f"{t.get('costSeconds', 0)}s",
-            "Created": t.get("createTime", "")[:16] if t.get("createTime") else "-"
-        } for t in tasks[:10]])
-        
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Summary stats
-        success_count = sum(1 for t in tasks if t.get("status") == 2)
-        running_count = sum(1 for t in tasks if t.get("status") == 1)
-        st.caption(f"📈 Last 20 tasks: {success_count} success, {running_count} running")
-    else:
-        st.info("No recent warmup tasks found")
+        creds = api_get("/credentials")
+        if creds and creds.get("credentials"):
+            cred_data = []
+            for c in creds["credentials"]:
+                cred_data.append({
+                    "Account": c.get("account_name", "Unknown"),
+                    "Username": c.get("tiktok_username", "—"),
+                    "Email": c.get("email", "—"),
+                    "Created": c.get("created_at", "—")[:10] if c.get("created_at") else "—",
+                })
+            
+            df = pd.DataFrame(cred_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Export
+            if st.button("📥 Export as CSV"):
+                csv = df.to_csv(index=False)
+                st.download_button("Download CSV", csv, "credentials.csv", "text/csv")
+        else:
+            st.info("No credentials stored yet.")
 
 
 # ===========================
-# Videos Page
+# PAGE: Videos
 # ===========================
 
 elif page == "🎬 Videos":
-    st.title("🎬 Video Management")
+    st.markdown("## 🎬 Video Management")
+    st.caption("Generate AI videos and manage your video library")
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🤖 AI Generate", "📋 Video Library", "📤 Post to TikTok", "📁 Upload Manual", "📅 Scheduled Posts", "📊 Task Logs"])
+    tab1, tab2, tab3 = st.tabs(["🤖 AI Generate", "📚 Video Library", "📤 Post to TikTok"])
     
-    # ===== AI GENERATE TAB =====
     with tab1:
-        st.subheader("🤖 AI Teamwork Video Generator")
-        st.caption("Generate POV videos for teamwork trend using AI (Cost: ~$0.24/video)")
+        st.markdown("### 🤖 Generate Teamwork Videos")
+        st.caption("AI-generated teamwork trend videos with originality effects")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            video_count = st.number_input("Videos to Generate", min_value=1, max_value=20, value=3)
-        with col2:
-            video_style = st.selectbox(
-                "Scene Style",
-                ["Random (Mixed)", "Nature Park", "Beach", "Forest", "City", "Mountain"]
-            )
-        
-        # Text overlay options
-        text_overlay = st.selectbox(
-            "Text Overlay",
-            ["Random", "teamwork trend", "teamwork ifb", "teamwork makes the dream work", 
-             "let's go teamwork", "teamwork challenge", "teamwork goals 💪"]
-        )
-        
-        skip_overlay = st.checkbox("Skip text overlay (add later in TikTok editor)", value=False)
-        
-        # Cost estimate
-        estimated_cost = video_count * 0.24
-        st.info(f"💰 Estimated cost: **${estimated_cost:.2f}** for {video_count} videos")
-        
-        if st.button("🎥 Generate Videos", type="primary", use_container_width=True):
-            # Map style selection
-            style_map = {
-                "Random (Mixed)": None,
-                "Nature Park": "nature park",
-                "Beach": "beach",
-                "Forest": "forest",
-                "City": "city",
-                "Mountain": "mountain"
-            }
-            
-            # Start job (returns immediately with job_id)
-            if video_count == 1:
-                result = api_post("/videos/generate", {
-                    "style": style_map.get(video_style),
-                    "text_overlay": None if text_overlay == "Random" else text_overlay,
-                    "skip_overlay": skip_overlay
-                })
-            else:
-                result = api_post("/videos/batch", {
-                    "count": video_count,
-                    "styles": [style_map.get(video_style)] if video_style != "Random (Mixed)" else None,
-                    "skip_overlay": skip_overlay
-                })
-            
-            if result and result.get("job_id"):
-                job_id = result["job_id"]
-                st.info(f"🚀 Video generation started! Job ID: **{job_id}**")
-                st.markdown("⏳ Generating videos takes 2-5 minutes per video. Check the **Video Library** tab for results.")
-                st.markdown(f"You can also poll status at: `/api/videos/job/{job_id}`")
-            elif result:
-                st.warning(f"Unexpected response: {result}")
-    
-    # ===== VIDEO LIBRARY TAB =====
-    with tab2:
-        st.subheader("📋 Generated Videos")
-        
-        col1, col2 = st.columns([4, 1])
-        with col2:
-            if st.button("🔄 Refresh", key="refresh_videos"):
-                st.rerun()
-        
-        # Get generated videos from new API
-        gen_videos = api_get("/videos/list")
-        
-        if gen_videos and gen_videos.get("videos"):
-            st.write(f"**{gen_videos['count']} videos** in library")
-            
-            for vid in gen_videos["videos"]:
-                with st.container():
-                    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-                    with col1:
-                        st.write(f"**{vid['filename']}**")
-                        st.caption(f"Size: {vid['size_mb']} MB | Created: {vid['created_at'][:16]}")
-                    with col2:
-                        # Download link
-                        download_url = f"{API_BASE_URL}/videos/download/{vid['filename']}"
-                        st.markdown(f"[📥 Download]({download_url})")
-                    with col3:
-                        # Preview toggle
-                        if st.button("👁️ Preview", key=f"preview_{vid['filename']}"):
-                            st.session_state[f"show_preview_{vid['filename']}"] = not st.session_state.get(f"show_preview_{vid['filename']}", False)
-                    with col4:
-                        if st.button("🗑️", key=f"del_{vid['filename']}"):
-                            result = api_delete(f"/videos/{vid['filename']}")
-                            if result and result.get("success"):
-                                st.success("Deleted!")
-                                st.rerun()
-                    
-                    # Show video preview if toggled
-                    if st.session_state.get(f"show_preview_{vid['filename']}", False):
-                        video_url = f"{API_BASE_URL}/videos/download/{vid['filename']}"
-                        st.video(video_url)
-                
-                st.markdown("---")
-        else:
-            st.info("No videos generated yet. Use the 'AI Generate' tab to create teamwork videos!")
-        
-            st.info("No legacy videos. All new videos appear in the Generated Videos list above.")
-        
-        # ===== VIDEO ACTIVITY LOG =====
-        st.markdown("---")
-        st.subheader("📊 Video Activity Log")
-        st.caption("Recent video posting jobs - shows scheduled and manual posting attempts")
-        
-        jobs_data = api_get("/videos/jobs")
-        if jobs_data and jobs_data.get("jobs"):
-            for job in jobs_data["jobs"]:
-                status_icon = "✅" if job["status"] == "completed" else "🔄" if job["status"] == "running" else "❌" if job["status"] == "failed" else "⏳"
-                with st.container():
-                    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
-                    with col1:
-                        st.write(f"{status_icon} **{job['job_id']}**")
-                        st.caption(f"Created: {job.get('created_at', 'N/A')[:16] if job.get('created_at') else 'N/A'}")
-                    with col2:
-                        st.write(f"📹 {len(job.get('videos', []))} videos")
-                        st.write(f"📱 {len(job.get('phone_ids', []))} phones")
-                    with col3:
-                        st.write(f"✅ {job.get('successful', 0)} success")
-                        st.write(f"❌ {job.get('failed', 0)} failed")
-                    with col4:
-                        st.write(f"**{job['status'].upper()}**")
-                        st.caption(job.get('message', '')[:40])
-                st.markdown("---")
-        else:
-            st.info("No posting jobs recorded yet. Jobs appear here when you post videos manually or via scheduler.")
-    
-    # ===== POST TO TIKTOK TAB =====
-    with tab3:
-        st.subheader("📤 Post Videos to TikTok")
-        st.caption("Select videos and phones to post to TikTok via GeeLark")
-        
-        # Get available videos
-        gen_videos = api_get("/videos/list")
-        available_videos = []
-        selected_videos = []  # Initialize to prevent NameError
-        
-        if gen_videos and gen_videos.get("videos"):
-            available_videos = [v["filename"] for v in gen_videos["videos"]]
-        
-        if not available_videos:
-            st.warning("No videos available. Generate videos in the 'AI Generate' tab first!")
-        else:
-            # Video selection
-            selected_videos = st.multiselect(
-                "Select Videos to Post",
-                options=available_videos,
-                default=available_videos[:1],  # Default to first video
-                help="Choose which videos to post"
-            )
-            
-            st.caption(f"📽️ {len(selected_videos)} video(s) selected")
-        
-        # Get phones
-        phones = api_get("/geelark/phones")
-        
-        if phones and phones.get("items"):
-            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
-            
-            selected_phones = st.multiselect(
-                "Select Phones",
-                options=list(phone_options.keys()),
-                help="Videos will be posted from these phones"
-            )
-            
-            # Get caption
-            caption_result = api_get("/videos/caption")
-            if caption_result:
-                st.write("**Suggested Caption:**")
-                st.info(caption_result.get("full_description", ""))
-                
-                custom_caption = st.text_area(
-                    "Custom Caption (or leave blank for random)",
-                    value="",
-                    placeholder=caption_result.get("caption", "")
-                )
-                
-                hashtags = st.text_input(
-                    "Hashtags",
-                    value=caption_result.get("hashtags", "#teamwork #teamworktrend #fyp")
-                )
-            else:
-                custom_caption = st.text_area("Caption", value="")
-                hashtags = st.text_input("Hashtags", value="#teamwork #fyp #viral")
-            
-            st.markdown("---")
-            
-            # Status info
-            can_post = selected_phones and available_videos and selected_videos
-            
-            if st.button("📤 Start Posting", type="primary", use_container_width=True, disabled=not can_post):
-                phone_ids = [phone_options[p] for p in selected_phones]
-                
-                # Start the posting job (returns immediately)
-                with st.spinner("Starting posting job..."):
-                    result = api_post("/videos/post/batch", {
-                        "videos": selected_videos,
-                        "phone_ids": phone_ids,
-                        "caption": custom_caption,
-                        "hashtags": hashtags
-                    })
-                
-                if result and result.get("job_id"):
-                    job_id = result["job_id"]
-                    st.info(f"🚀 Posting job started! Job ID: {job_id}")
-                    
-                    # Poll for job status
-                    status_placeholder = st.empty()
-                    progress_bar = st.progress(0)
-                    max_polls = 60  # 5 minutes max
-                    poll_count = 0
-                    
-                    while poll_count < max_polls:
-                        import time
-                        time.sleep(5)
-                        poll_count += 1
-                        progress_bar.progress(min(poll_count / max_polls, 0.9))
-                        
-                        try:
-                            job_status = api_get(f"/videos/post/job/{job_id}")
-                            if job_status:
-                                status = job_status.get("status", "unknown")
-                                message = job_status.get("message", "Processing...")
-                                status_placeholder.info(f"📊 Status: {message}")
-                                
-                                if status == "completed":
-                                    progress_bar.progress(1.0)
-                                    successful = job_status.get("successful", 0)
-                                    failed = job_status.get("failed", 0)
-                                    
-                                    if successful > 0:
-                                        st.success(f"✅ Posted {successful} video(s) successfully!")
-                                    if failed > 0:
-                                        st.warning(f"⚠️ {failed} posting(s) failed")
-                                    
-                                    with st.expander("View Details"):
-                                        for r in job_status.get("results", []):
-                                            if r.get("success"):
-                                                st.write(f"✅ {r.get('video')} → {r.get('phone_id', '')[:8]}...")
-                                            else:
-                                                st.write(f"❌ {r.get('video')}: {r.get('error')}")
-                                    break
-                                    
-                                elif status == "failed":
-                                    progress_bar.progress(1.0)
-                                    st.error(f"❌ Job failed: {message}")
-                                    break
-                        except Exception as e:
-                            status_placeholder.warning(f"Checking status... ({e})")
-                    else:
-                        st.warning("⏱️ Job still running. Check Task Logs tab for results.")
-                else:
-                    st.error("Failed to start posting job")
-            
-            if not can_post:
-                if not selected_videos:
-                    st.info("👆 Select videos to post")
-                elif not selected_phones:
-                    st.info("👆 Select phones to post from")
-        else:
-            st.warning("No phones available. Set up phones in the GeeLark page first.")
-    
-    # ===== UPLOAD MANUAL TAB =====
-    with tab4:
-        st.subheader("📁 Upload Video Manually")
-        
-        uploaded_file = st.file_uploader("Choose a video file", type=["mp4", "mov", "avi"])
-        caption = st.text_area("Caption")
-        hashtags = st.text_input("Hashtags (comma-separated)")
-        
-        if st.button("📤 Upload") and uploaded_file:
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-            data = {"caption": caption, "hashtags": hashtags}
-            
-            try:
-                response = requests.post(
-                    f"{API_BASE_URL}/videos/upload",
-                    files=files,
-                    data=data,
-                    timeout=60
-                )
-                if response.ok:
-                    st.success("Video uploaded successfully!")
-                else:
-                    st.error(f"Upload failed: {response.text}")
-            except Exception as e:
-                st.error(f"Error: {e}")
-    
-    # ===== SCHEDULED POSTS TAB =====
-    with tab5:
-        st.subheader("📅 Automated Daily Video Posts")
-        st.caption("Schedule automatic video generation and posting to TikTok")
-        
-        st.markdown("---")
-        
-        # Current schedule status
-        st.write("**🕐 Current Schedule:**")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.info("🧘 **Warmup:** 8:00 AM EST")
-        with col2:
-            st.info("🎥 **Videos:** 9:00 AM EST")
-        with col3:
-            st.info("📤 **Posting:** 10 AM, 1 PM, 5 PM EST")
-        
-        st.markdown("---")
-        
-        # Configuration
-        st.write("**⚙️ Configuration:**")
-        
-        # Load saved config from database (persists across page refresh)
-        saved_config = api_get("/schedule/config")
-        if saved_config is None:
-            saved_config = {"enabled": False, "phone_ids": [], "posts_per_phone": 3, "enable_warmup": True, "auto_delete": True}
-        
-        # Fetch phones for selection
-        phones_data = api_get("/geelark/phones")
-        available_phones = []
-        if phones_data and phones_data.get("items"):
-            available_phones = phones_data["items"]
-        
-        if available_phones:
-            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in available_phones}
-            phone_id_to_name = {v: k for k, v in phone_options.items()}
-            
-            # Pre-select phones from saved config
-            default_selection = [phone_id_to_name[pid] for pid in saved_config.get("phone_ids", []) if pid in phone_id_to_name]
-            
-            selected_phones = st.multiselect(
-                "📱 Phones for Daily Posting",
-                options=list(phone_options.keys()),
-                default=default_selection,
-                help="Select which phones should receive daily video posts"
-            )
-            
-            # Store selected phone IDs (for use in buttons)
-            selected_phone_ids = [phone_options[name] for name in selected_phones]
-            st.session_state.scheduled_phones = selected_phone_ids
-            
-            if not selected_phones:
-                st.warning("⚠️ Select at least one phone for automated posting")
-        else:
-            st.warning("⚠️ No phones available. Create phones in GeeLark first.")
-            selected_phone_ids = []
-            st.session_state.scheduled_phones = []
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            posts_per_phone = st.number_input(
-                "Posts per Phone per Day",
-                min_value=1,
-                max_value=5,
-                value=saved_config.get("posts_per_phone", 3),
-                help="How many times each phone should post daily"
-            )
-        with col2:
-            # Auto-calculate videos needed
-            num_phones = len(st.session_state.get("scheduled_phones", []))
-            videos_needed = num_phones * posts_per_phone
-            st.metric("📹 Videos to Generate Daily", videos_needed if num_phones > 0 else "-")
-            if num_phones > 0:
-                st.caption(f"{num_phones} phones × {posts_per_phone} posts = {videos_needed} videos")
-        
-        # Store calculated value for use in generation
-        daily_videos = videos_needed if num_phones > 0 else 3
-        
-        # Automation options
-        st.write("**🔧 Automation Options:**")
-        col1, col2 = st.columns(2)
-        with col1:
-            enable_warmup = st.checkbox(
-                "🧘 Include warmup before video generation",
-                value=True,
-                help="Runs enhanced warmup at 8 AM EST (1 hour before video gen)"
-            )
-            st.session_state.enable_warmup = enable_warmup
-        with col2:
-            auto_delete = st.checkbox(
-                "🗑️ Auto-delete videos after posting",
-                value=True,
-                help="Removes videos from library after confirmed posted"
-            )
-            st.session_state.auto_delete_posted = auto_delete
-        
-        # Estimated costs
-        num_phones = len(st.session_state.get("scheduled_phones", [])) or 1
-        daily_cost = daily_videos * 0.24
-        monthly_cost = daily_cost * 30
-        st.write(f"💰 **Estimated Cost:** ${daily_cost:.2f}/day (~${monthly_cost:.2f}/month)")
-        st.caption(f"📱 {num_phones} phone(s) selected × {posts_per_phone} post(s)/day = {num_phones * posts_per_phone} total posts/day")
-        
-        st.markdown("---")
-        
-        # Manual triggers
-        st.write("**🎮 Manual Controls:**")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🎥 Generate Videos Now", use_container_width=True):
-                result = api_post("/videos/batch", {
-                    "count": daily_videos,
-                    "styles": None,  # Random
-                    "skip_overlay": False
-                })
-                if result and result.get("job_id"):
-                    st.success(f"🚀 Generation started! Job ID: **{result['job_id']}**")
-                    st.info("Check the **Video Library** tab in 2-5 minutes for results.")
-                else:
-                    st.error("Failed to start video generation")
-        
-        with col2:
-            # Only enable if phones are selected and videos exist
-            can_post = len(st.session_state.get("scheduled_phones", [])) > 0
-            
-            if st.button("📤 Post Now", use_container_width=True, disabled=not can_post):
-                # Get available videos
-                videos_resp = api_get("/videos/list")
-                if videos_resp and videos_resp.get("videos"):
-                    video_filenames = [v["filename"] for v in videos_resp["videos"][:3]]  # Post up to 3
-                    phone_ids = st.session_state.scheduled_phones
-                    
-                    with st.spinner("Starting posting job..."):
-                        result = api_post("/videos/post/batch", {
-                            "videos": video_filenames,
-                            "phone_ids": phone_ids,
-                            "caption": "",
-                            "hashtags": "#teamwork #teamworktrend #teamworkchallenge",
-                            "auto_start": True,
-                            "auto_stop": True,
-                            "auto_delete": st.session_state.get("auto_delete_posted", True)
-                        })
-                    
-                    if result and result.get("job_id"):
-                        st.success(f"🚀 Posting job started! Job ID: {result['job_id']}")
-                        st.info("📊 Check the **Task Logs** tab to monitor progress. Job runs in background.")
-                    else:
-                        st.error(f"Failed to start posting job: {result}")
-                else:
-                    st.error("No videos available. Generate some first!")
-            
-            if not can_post:
-                st.caption("⚠️ Select phones above to enable posting")
-        
-        st.markdown("---")
-        
-        # Scheduling Controls
-        st.write("**📅 Scheduling Controls:**")
-        
-        # Use saved_config from database (loaded earlier in this tab)
-        scheduling_enabled = saved_config.get("enabled", False)
-        
-        col1, col2, col3 = st.columns([2, 2, 2])
-        
-        with col1:
-            if not scheduling_enabled:
-                if st.button("✅ Enable Daily Scheduling", use_container_width=True, type="primary", 
-                             disabled=not selected_phone_ids):
-                    # Save to database API
-                    result = api_post("/schedule/config", {
-                        "enabled": True,
-                        "phone_ids": selected_phone_ids,
-                        "posts_per_phone": posts_per_phone,
-                        "enable_warmup": st.session_state.get("enable_warmup", True),
-                        "auto_delete": st.session_state.get("auto_delete_posted", True)
-                    })
-                    if result and result.get("success"):
-                        st.success("🎉 Daily scheduling enabled and saved!")
-                        st.info(f"📱 Phones: {len(selected_phone_ids)} | 🎥 Videos/day: {daily_videos} | 📤 Posts/phone: {posts_per_phone}")
-                        st.rerun()
-                    else:
-                        st.error("Failed to save config")
-            else:
-                # Already enabled - show Update button if settings have changed
-                saved_phone_set = set(saved_config.get("phone_ids", []))
-                current_phone_set = set(selected_phone_ids)
-                config_changed = (saved_phone_set != current_phone_set or 
-                                  saved_config.get("posts_per_phone") != posts_per_phone or
-                                  saved_config.get("enable_warmup") != st.session_state.get("enable_warmup", True) or
-                                  saved_config.get("auto_delete") != st.session_state.get("auto_delete_posted", True))
-                
-                if config_changed:
-                    if st.button("💾 Save Changes", use_container_width=True, type="primary"):
-                        result = api_post("/schedule/config", {
-                            "enabled": True,
-                            "phone_ids": selected_phone_ids,
-                            "posts_per_phone": posts_per_phone,
-                            "enable_warmup": st.session_state.get("enable_warmup", True),
-                            "auto_delete": st.session_state.get("auto_delete_posted", True)
-                        })
-                        if result and result.get("success"):
-                            st.success("✅ Schedule updated!")
-                            st.rerun()
-                        else:
-                            st.error("Failed to save changes")
-                else:
-                    st.success("✅ Scheduling is **ENABLED**")
-        
-        with col2:
-            if scheduling_enabled:
-                if st.button("⏹️ Disable Scheduling", use_container_width=True):
-                    # Disable in database
-                    result = api_post("/schedule/config", {"enabled": False})
-                    if result and result.get("success"):
-                        st.warning("Scheduling disabled")
-                        st.rerun()
-        
-        with col3:
-            if scheduling_enabled:
-                phone_count = len(saved_config.get("phone_ids", []))
-                st.caption(f"📱 {phone_count} phones configured")
-                if saved_config.get("updated_at"):
-                    st.caption(f"Last saved: {saved_config['updated_at'][:16]}")
-        
-        if not selected_phone_ids:
-            st.warning("⚠️ Select phones above before enabling scheduling")
-        
-        st.markdown("---")
-        
-        # Status info
-        st.write("**📊 Status:**")
-        gen_videos = api_get("/videos/list")
-        if gen_videos:
-            st.success(f"✅ {gen_videos.get('count', 0)} videos ready in library")
-        else:
-            st.warning("No videos generated yet")
-        
-        # Show scheduling log summary
-        if scheduling_enabled:
-            st.info("🔄 Scheduler active! Check server logs for exact run times")
-    
-    # ===== TASK LOGS TAB =====
-    with tab6:
-        st.subheader("📊 Video Posting Task Logs")
-        st.caption("Monitor the status of video posting tasks (taskType=1)")
-        
-        # Refresh button
-        if st.button("🔄 Refresh Task Status", key="refresh_video_tasks"):
-            st.rerun()
-        
-        # Fetch tasks with task_type=1 (video posting)
-        tasks_result = api_post("/geelark/tasks/query", {
-            "task_type": 1,  # Video posting tasks only
-            "page": 1,
-            "page_size": 50
-        })
-        
-        if tasks_result and tasks_result.get("items"):
-            tasks = tasks_result["items"]
-            
-            # Status mapping
-            status_map = {
-                1: "⏳ Pending",
-                2: "🔄 Running",
-                3: "✅ Success",
-                4: "❌ Failed",
-                5: "⏸️ Cancelled"
-            }
-            
-            # Create dataframe
-            df_data = []
-            for t in tasks:
-                status = status_map.get(t.get("status"), f"Unknown ({t.get('status')})")
-                created = t.get("createTime", "")
-                if created:
-                    try:
-                        created = datetime.fromisoformat(created.replace("Z", "+00:00")).strftime("%m/%d %H:%M")
-                    except:
-                        pass
-                
-                df_data.append({
-                    "Task ID": t.get("id", "")[:12] + "...",
-                    "Phone": t.get("serialName", "Unknown"),
-                    "Status": status,
-                    "Description": (t.get("videoDesc", "") or "")[:50] + "..." if t.get("videoDesc") else "-",
-                    "Created": created,
-                    "Error": t.get("failReason", "-")
-                })
-            
-            df = pd.DataFrame(df_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-            
-            # Summary stats
-            success_count = sum(1 for t in tasks if t.get("status") == 3)
-            failed_count = sum(1 for t in tasks if t.get("status") == 4)
-            pending_count = sum(1 for t in tasks if t.get("status") in [1, 2])
-            
+        with st.form("generate_video"):
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("✅ Success", success_count)
+                video_count = st.number_input("Number of Videos", min_value=1, max_value=20, value=3)
             with col2:
-                st.metric("❌ Failed", failed_count)
+                style_hint = st.selectbox("Style", ["nature", "beach", "city", "sunset", "mountains", "forest", "ocean"])
             with col3:
-                st.metric("⏳ Pending/Running", pending_count)
-        else:
-            st.info("No video posting tasks found. Post some videos to see task status here!")
-
-
-# ===========================
-# Proxies Page
-# ===========================
-
-elif page == "🌐 Proxies":
-    st.title("Proxy Management")
-    
-    tab1, tab2 = st.tabs(["📋 Proxy List", "➕ Add Proxies"])
-    
-    with tab1:
-        proxies = api_get("/proxies")
-        
-        if proxies:
-            df = pd.DataFrame([{
-                "ID": p["id"],
-                "Host": p["host"],
-                "Port": p["port"],
-                "Protocol": p["protocol"],
-                "Location": p.get("location", "-"),
-                "Assigned": "✅" if p["is_assigned"] else "❌",
-                "Active": "✅" if p["is_active"] else "❌"
-            } for p in proxies])
+                skip_overlay = st.checkbox("Skip text overlay", value=False)
             
-            st.dataframe(df, use_container_width=True)
-            
-            available = len([p for p in proxies if not p["is_assigned"] and p["is_active"]])
-            st.info(f"**{available}** proxies available for assignment")
-        else:
-            st.info("No proxies found. Add some proxies!")
-    
-    with tab2:
-        st.subheader("Bulk Import Proxies")
-        st.caption("Format: host:port:username:password (one per line)")
-        
-        proxy_text = st.text_area("Proxies", height=200)
-        protocol = st.selectbox("Protocol", ["HTTP", "SOCKS5"])
-        
-        if st.button("➕ Import Proxies"):
-            if proxy_text.strip():
-                result = api_post("/proxies/bulk", {
-                    "proxy_list": proxy_text,
-                    "protocol": protocol
-                })
-                if result:
-                    st.success(f"Imported {len(result)} proxies!")
-
-
-# ===========================
-# Logs Page
-# ===========================
-
-elif page == "📊 Logs":
-    st.title("📊 Activity Logs & Status")
-    
-    # Real-time Status Overview
-    st.subheader("🔄 System Status")
-    
-    # Get quick stats
-    stats = api_get("/dashboard/stats")
-    if stats:
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("🔥 Warming Up", stats.get("warming_up", 0))
-        with col2:
-            st.metric("✅ Active", stats.get("active", 0))
-        with col3:
-            st.metric("📱 Phones", stats.get("total_accounts", 0))
-        with col4:
-            st.metric("🚫 Banned", stats.get("banned", 0))
-    
-    st.markdown("---")
-    
-    # Tabs for different log views
-    tab1, tab2 = st.tabs(["📋 Activity Feed", "⚠️ Errors Only"])
-    
-    with tab1:
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            account_filter = st.number_input("Account ID (0 = all)", min_value=0, value=0)
-        with col2:
-            action_filter = st.selectbox(
-                "Action Type",
-                ["All", "account_created", "full_setup_started", "full_setup_completed",
-                 "warmup_started", "warmup_session", "warmup_completed", 
-                 "phone_stopped_after_warmup", "phone_started", "phone_stopped",
-                 "video_posted", "ban_detected", "account_recovered", "phone_recreated"]
-            )
-        with col3:
-            if st.button("🔄 Refresh"):
-                st.rerun()
-        
-        endpoint = "/logs?limit=50&"
-        if account_filter > 0:
-            endpoint += f"account_id={account_filter}&"
-        if action_filter != "All":
-            endpoint += f"action_type={action_filter}&"
-        
-        logs = api_get(endpoint.rstrip("?&"))
-        
-        if logs and logs.get("items"):
-            for log in logs["items"]:
-                # Color-coded status icons
-                if log["success"]:
-                    if "completed" in log["action_type"]:
-                        icon = "🎉"
-                    elif "started" in log["action_type"]:
-                        icon = "🚀"
-                    elif "stopped" in log["action_type"]:
-                        icon = "⏹️"
-                    elif "warmup" in log["action_type"]:
-                        icon = "🔥"
+            if st.form_submit_button("🎬 Generate Videos", use_container_width=True, type="primary"):
+                with st.spinner(f"Generating {video_count} videos..."):
+                    result = api_post("/videos/generate", {
+                        "count": video_count,
+                        "style_hint": style_hint,
+                        "skip_overlay": skip_overlay
+                    })
+                    if result:
+                        job_id = result.get("job_id")
+                        st.success(f"Video generation started! Job ID: {job_id}")
                     else:
-                        icon = "✅"
-                else:
-                    icon = "❌"
+                        st.error("Failed to start video generation")
+        
+        # Job status
+        st.markdown("### Active Jobs")
+        jobs = api_get("/videos/jobs")
+        if jobs and jobs.get("jobs"):
+            for job in jobs["jobs"]:
+                status = job.get("status", "unknown")
+                progress = job.get("progress", 0)
                 
-                # Format the log entry
-                timestamp = log['created_at'][:19].replace('T', ' ')
-                
-                with st.container():
-                    st.markdown(f"""
-                    **{icon} {log['action_type'].replace('_', ' ').title()}** - Account #{log['account_id']}  
-                    🕐 *{timestamp}*
-                    """)
-                    
-                    # Show action details if available
-                    if log.get("action_details"):
-                        details = log["action_details"]
-                        if isinstance(details, dict):
-                            detail_str = " | ".join([f"**{k}**: {v}" for k, v in details.items() if v is not None][:4])
-                            if detail_str:
-                                st.caption(detail_str)
-                    
-                    if log.get("error_message"):
-                        st.error(f"⚠️ {log['error_message']}")
-                    
-                    st.markdown("---")
+                col1, col2, col3 = st.columns([2, 4, 1])
+                with col1:
+                    st.markdown(f"**{job['job_id'][:8]}...**")
+                with col2:
+                    st.progress(progress / 100 if progress else 0, text=f"{status} ({progress}%)")
+                with col3:
+                    st.markdown(status_badge(status), unsafe_allow_html=True)
         else:
-            st.info("No activity logs yet. Start a Magic Setup to see logs here!")
+            st.info("No active generation jobs")
     
     with tab2:
-        st.subheader("⚠️ Recent Errors")
+        st.markdown("### 📚 Video Library")
         
-        error_logs = api_get("/logs?success=false&limit=20")
-        
-        if error_logs and error_logs.get("items"):
-            for log in error_logs["items"]:
-                timestamp = log['created_at'][:19].replace('T', ' ')
-                
-                st.error(f"""
-                **❌ {log['action_type']}** - Account #{log['account_id']}  
-                🕐 {timestamp}  
-                **Error:** {log.get('error_message', 'Unknown error')}
-                """)
-                st.markdown("---")
+        videos = api_get("/videos/list")
+        if videos and videos.get("videos"):
+            video_list = videos["videos"]
+            st.markdown(f"**{len(video_list)} videos available**")
+            
+            for v in video_list:
+                col1, col2, col3, col4 = st.columns([4, 2, 2, 1])
+                with col1:
+                    st.markdown(f"🎬 **{v.get('filename', 'Unknown')}**")
+                with col2:
+                    size = v.get('size_mb', 0)
+                    st.caption(f"{size:.1f} MB" if size else "—")
+                with col3:
+                    created = v.get('created', '')
+                    st.caption(created[:16] if created else "—")
+                with col4:
+                    if st.button("🗑️", key=f"del_vid_{v.get('filename', '')}"):
+                        api_delete(f"/videos/{v.get('filename', '')}")
+                        st.rerun()
         else:
-            st.success("🎉 No errors! Everything is running smoothly.")
+            st.info("No videos in library. Generate some using the AI Generate tab!")
+    
+    with tab3:
+        st.markdown("### 📤 Post Videos to TikTok")
+        st.caption("Post videos to your GeeLark phones")
+        
+        # Fetch phones and videos
+        phones = api_get("/geelark/phones")
+        videos = api_get("/videos/list")
+        
+        if phones and phones.get("items") and videos and videos.get("videos"):
+            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
+            video_options = [v['filename'] for v in videos['videos']]
+            
+            with st.form("post_videos"):
+                selected_phones = st.multiselect("Select Phones", options=list(phone_options.keys()))
+                selected_videos = st.multiselect("Select Videos", options=video_options)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    caption = st.text_input("Caption", value="")
+                    hashtags = st.text_input("Hashtags",
+                        value="#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo")
+                with col2:
+                    auto_start = st.checkbox("Auto-start phones", value=True)
+                    auto_stop = st.checkbox("Auto-stop phones after", value=True)
+                    auto_delete = st.checkbox("Delete video after posting", value=True)
+                
+                if st.form_submit_button("📤 Post Now", use_container_width=True, type="primary"):
+                    if selected_phones and selected_videos:
+                        phone_ids = [phone_options[p] for p in selected_phones]
+                        result = api_post("/videos/post/batch", {
+                            "videos": selected_videos,
+                            "phone_ids": phone_ids,
+                            "caption": caption,
+                            "hashtags": hashtags,
+                            "auto_start": auto_start,
+                            "auto_stop": auto_stop,
+                            "auto_delete": auto_delete,
+                            "distribute_mode": "round_robin"
+                        })
+                        if result:
+                            st.success(f"Posting job started! Job ID: {result.get('job_id', 'unknown')}")
+                        else:
+                            st.error("Failed to start posting")
+                    else:
+                        st.warning("Select at least one phone and one video")
+        else:
+            if not phones or not phones.get("items"):
+                st.warning("No phones available. Add phones in GeeLark first.")
+            if not videos or not videos.get("videos"):
+                st.warning("No videos available. Generate videos first.")
+        
+        # Posting job status
+        st.markdown("---")
+        st.markdown("### 📊 Posting Job Status")
+        
+        if "posting_job_id" not in st.session_state:
+            st.session_state.posting_job_id = ""
+        
+        job_id_input = st.text_input("Job ID to check", value=st.session_state.posting_job_id)
+        if job_id_input:
+            job_status = api_get(f"/videos/post/status/{job_id_input}")
+            if job_status:
+                st.json(job_status)
 
 
 # ===========================
-# GeeLark Page
+# PAGE: GeeLark
 # ===========================
 
 elif page == "⚙️ GeeLark":
-    st.title("GeeLark Direct Control")
+    st.markdown("## ⚙️ GeeLark Cloud Phones")
+    st.caption("Direct GeeLark phone management")
     
-    tab1, tab2, tab3 = st.tabs(["📱 Cloud Phones", "📋 Task History", "🔧 Task Management"])
+    tab1, tab2, tab3 = st.tabs(["📱 Cloud Phones", "📋 Task History", "✨ Magic Setup"])
     
     with tab1:
-        st.subheader("Cloud Phones")
+        st.markdown("### Cloud Phones")
         
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            if st.button("🔄 Refresh"):
-                st.rerun()
+        if st.button("🔄 Refresh Phone List"):
+            st.rerun()
         
         phones = api_get("/geelark/phones")
         
         if phones and phones.get("items"):
-            df = pd.DataFrame([{
-                "ID": p["id"],
-                "Name": p["serialName"],
-                "Status": ["Started", "Starting", "Shutdown"][p.get("status", 2)],
-                "OS": p.get("equipmentInfo", {}).get("osVersion", "-"),
-                "Proxy": p.get("proxy", {}).get("server", "-") if p.get("proxy") else "-"
-            } for p in phones["items"]])
-            
-            st.dataframe(df, use_container_width=True)
-            
-            # Quick controls
-            st.subheader("Quick Controls")
-            phone_ids = st.text_input("Phone IDs (comma-separated)")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("▶️ Start Phones"):
-                    if phone_ids:
-                        ids = [x.strip() for x in phone_ids.split(",")]
-                        result = api_post("/geelark/phones/start", {"ids": ids})
+            for phone in phones["items"]:
+                col1, col2, col3, col4, col5 = st.columns([3, 2, 1, 1, 1])
+                
+                with col1:
+                    name = phone.get("serialName", "Unknown")
+                    phone_id = phone.get("id", "")
+                    st.markdown(f"**{name}**")
+                    st.caption(f"ID: {phone_id[:16]}...")
+                
+                with col2:
+                    status = phone.get("status", -1)
+                    status_map = {0: "🟢 Running", 1: "🔴 Stopped", 2: "🟡 Starting"}
+                    st.markdown(status_map.get(status, f"⚪ Unknown ({status})"))
+                
+                with col3:
+                    if st.button("▶️", key=f"start_{phone_id}", help="Start phone"):
+                        result = api_post("/geelark/phones/start", {"phone_ids": [phone_id]})
                         if result:
-                            st.success(f"Started {result.get('successAmount', 0)} phones")
-            with col2:
-                if st.button("⏹️ Stop Phones"):
-                    if phone_ids:
-                        ids = [x.strip() for x in phone_ids.split(",")]
-                        result = api_post("/geelark/phones/stop", ids)
+                            st.success("Starting...")
+                            st.rerun()
+                
+                with col4:
+                    if st.button("⏹️", key=f"stop_{phone_id}", help="Stop phone"):
+                        result = api_post("/geelark/phones/stop", {"phone_ids": [phone_id]})
                         if result:
-                            st.success("Phones stopped")
-            
-            st.markdown("---")
-            
-            # Warmup Controls - Multi-select + Warmup Modes
-            st.subheader("🔥 Run Warmup on Selected Phones")
-            
-            # Create dropdown options from phone list
-            phone_options = {f"{p['serialName']} ({p['id'][:8]}...)": p['id'] for p in phones['items']}
-            
-            # Multi-select for phones (mobile-friendly: full width)
-            selected_phones = st.multiselect(
-                "Select Phones (can pick multiple)", 
-                options=list(phone_options.keys()),
-                help="Pick one or more phones to run warmup"
-            )
-            
-            # Settings in columns (stacks on mobile)
-            col1, col2 = st.columns(2)
-            with col1:
-                warmup_mode = st.selectbox(
-                    "Warmup Mode",
-                    options=["🚀 Enhanced Teamwork (+ Comments/Likes)", "🎯 Teamwork Trend (Search Only)", "📱 General FYP Browse"],
-                    help="Enhanced: Chains warmup + comments + likes. Teamwork: Searches keywords. General: Just browses."
-                )
-            with col2:
-                warmup_duration = st.number_input("Duration (min)", min_value=10, max_value=120, value=30)
-            
-            # Show advanced options for enhanced mode
-            enhanced_mode = "Enhanced" in warmup_mode
-            if enhanced_mode:
-                st.caption("🔗 **Enhanced Mode** chains: Warmup → AI Comments → Random Likes")
-                adv_col1, adv_col2 = st.columns(2)
-                with adv_col1:
-                    enable_comments = st.checkbox("Enable AI Comments", value=True, help="15% chance to leave relevant teamwork comments")
-                with adv_col2:
-                    enable_likes = st.checkbox("Enable Random Likes", value=True, help="30% chance to like videos")
-            else:
-                enable_comments = False
-                enable_likes = False
-            
-            # Big mobile-friendly button
-            if st.button("🔥 Run Warmup on Selected", type="primary", use_container_width=True):
-                if selected_phones:
-                    successes = []
-                    failures = []
-                    
-                    # Determine warmup action based on mode
-                    if "Enhanced" in warmup_mode or "Teamwork" in warmup_mode:
-                        action = "search video"
-                        keywords = ["teamwork trend", "teamwork challenge", "teamwork goals", "teamwork makes the dream work"]
-                    else:
-                        action = "browse video"
-                        keywords = None
-                    
-                    # Progress bar for batch
-                    progress = st.progress(0, text="Starting warmups...")
-                    
-                    for i, phone_name in enumerate(selected_phones):
-                        phone_id = phone_options[phone_name]
+                            st.success("Stopping...")
+                            st.rerun()
+                
+                with col5:
+                    if st.button("🔥", key=f"warmup_{phone_id}", help="Run warmup"):
                         result = api_post("/geelark/warmup/run", {
                             "phone_id": phone_id,
-                            "duration_minutes": warmup_duration,
-                            "action": action,
-                            "keywords": keywords,
-                            "enhanced": enhanced_mode,
-                            "enable_comments": enable_comments,
-                            "enable_likes": enable_likes
+                            "duration_minutes": 20,
+                            "action": "search video",
+                            "keywords": ["teamwork trend", "teamwork challenge"]
                         })
-                        
-                        if result and result.get("success"):
-                            successes.append(phone_name)
-                        else:
-                            failures.append(f"{phone_name}: {result.get('message', 'Unknown') if result else 'API error'}")
-                        
-                        progress.progress((i + 1) / len(selected_phones), text=f"Started {i + 1}/{len(selected_phones)}")
-                    
-                    # Show results
-                    if successes:
-                        st.success(f"✅ Warmup started on {len(successes)} phone(s): {', '.join(successes)}")
-                    if failures:
-                        st.error(f"❌ Failed: {'; '.join(failures)}")
-                else:
-                    st.warning("Please select at least one phone!")
-            
-            st.caption("💡 **Teamwork Mode** searches for teamwork content. **General** just browses FYP. Stop warmups in Task History tab.")
+                        if result:
+                            st.success("Warmup started!")
+                
+                st.markdown("---")
         else:
-            st.info("No phones found in GeeLark. Create some phones first!")
+            st.info("No phones found. Create phones via Magic Setup or GeeLark dashboard.")
     
     with tab2:
-        st.subheader("Task History (Last 7 Days)")
+        st.markdown("### Task History")
         
-        history = api_get("/geelark/tasks/history?size=50")
+        task_ids_input = st.text_input("Query Task IDs (comma-separated)", placeholder="task-id-1, task-id-2")
         
-        if history and history.get("items"):
-            task_types = {
-                1: "Video Post",
-                2: "AI Warmup",
-                3: "Carousel Post",
-                4: "Account Login",
-                6: "Profile Edit",
-                42: "Custom"
-            }
-            statuses = {
-                1: "⏳ Waiting",
-                2: "🔄 Running",
-                3: "✅ Completed",
-                4: "❌ Failed",
-                7: "🚫 Cancelled"
-            }
-            
-            # Common failure codes for quick reference
-            fail_codes = {
-                20116: "Not logged in",
-                20122: "TikTok start failed",
-                20129: "Device offline",
-                20124: "Homepage timeout",
-                20109: "No network connection",
-                20008: "Language not English",
-                20003: "Execution timeout",
-                29999: "Unknown error"
-            }
-            
-            # GeeLark pricing: $0.007/min (base rate)
-            COST_PER_MINUTE = 0.007
-            
-            def calc_usd_cost(cost_seconds):
-                if cost_seconds and isinstance(cost_seconds, (int, float)):
-                    return f"${(cost_seconds / 60 * COST_PER_MINUTE):.3f}"
-                return "-"
-            
-            df = pd.DataFrame([{
-                "Task ID": t["id"],
-                "Type": task_types.get(t["taskType"], "Unknown"),
-                "Phone": t["serialName"],
-                "Status": statuses.get(t["status"], "Unknown"),
-                "Fail Reason": fail_codes.get(t.get("failCode"), t.get("failDesc", "-")) if t["status"] == 4 else "-",
-                "Time (s)": t.get("cost", "-"),
-                "Cost (USD)": calc_usd_cost(t.get("cost"))
-            } for t in history["items"]])
-            
-            st.dataframe(df, use_container_width=True)
-            
-            # Show cost summary
-            total_seconds = sum(t.get("cost", 0) or 0 for t in history["items"])
-            total_usd = total_seconds / 60 * COST_PER_MINUTE
-            st.caption(f"💰 **Total usage shown:** {total_seconds:,}s ({total_seconds/60:.1f} min) = **${total_usd:.2f}** @ $0.007/min")
+        if task_ids_input and st.button("🔍 Query"):
+            ids = [x.strip() for x in task_ids_input.split(",")]
+            result = api_post("/geelark/tasks/query", {"task_ids": ids})
+            if result:
+                st.json(result)
     
     with tab3:
-        st.subheader("Task Management")
+        st.markdown("### ✨ Magic Setup")
+        st.caption("Create a new GeeLark phone with proxy, install TikTok, and prepare for automation")
         
-        task_ids = st.text_input("Task IDs (comma-separated)")
+        setup_tab1, setup_tab2 = st.tabs(["🔧 Single Setup", "🎯 Batch Setup"])
         
-        col1, col2, col3 = st.columns(3)
+        with setup_tab1:
+            with st.form("magic_setup"):
+                proxy_string = st.text_input(
+                    "Proxy String",
+                    placeholder="protocol://user:pass@host:port or host:port:user:pass"
+                )
+                name_prefix = st.text_input("Name Prefix", value="tiktok")
+                auto_schedule = st.checkbox("Auto-add to pipeline schedule", value=True)
+                
+                if st.form_submit_button("✨ Launch Magic Setup", use_container_width=True, type="primary"):
+                    if proxy_string:
+                        result = api_post("/accounts/full-setup-async", {
+                            "proxy_string": proxy_string,
+                            "name_prefix": name_prefix,
+                            "max_retries": 5
+                        })
+                        if result:
+                            st.success(f"Magic Setup launched! Task ID: {result.get('task_id')}")
+                    else:
+                        st.warning("Please enter a proxy string")
         
-        with col1:
-            if st.button("🔍 Query Status"):
-                if task_ids:
-                    ids = [x.strip() for x in task_ids.split(",")]
-                    result = api_post("/geelark/tasks/query", {"task_ids": ids})
-                    if result:
-                        st.json(result)
-        
-        with col2:
-            if st.button("❌ Cancel Tasks"):
-                if task_ids:
-                    ids = [x.strip() for x in task_ids.split(",")]
-                    result = api_post("/geelark/tasks/cancel", {"task_ids": ids})
-                    if result:
-                        st.success(f"Cancelled: {result.get('successAmount', 0)}")
-        
-        with col3:
-            if st.button("🔄 Retry Tasks"):
-                if task_ids:
-                    ids = [x.strip() for x in task_ids.split(",")]
-                    result = api_post("/geelark/tasks/retry", {"task_ids": ids})
-                    if result:
-                        st.success(f"Retried: {result.get('successAmount', 0)}")
-
-
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.caption("Built for automation 🤖")
+        with setup_tab2:
+            st.markdown("**Paste multiple proxies (one per line) to create accounts in bulk.**")
+            
+            proxies_text = st.text_area("Proxies (one per line)", height=150, placeholder="protocol://user:pass@host:port")
+            batch_prefix = st.text_input("Name Prefix", value="tiktok", key="batch_prefix")
+            batch_auto_enroll = st.checkbox("Auto-enroll in scheduler", value=True, key="batch_enroll")
+            
+            if st.button("🚀 Launch Batch Setup", use_container_width=True, type="primary"):
+                if proxies_text.strip():
+                    proxies = [p.strip() for p in proxies_text.strip().split("\n") if p.strip()]
+                    if proxies:
+                        result = api_post("/magic-setup/batch", {
+                            "proxies": proxies,
+                            "name_prefix": batch_prefix,
+                            "auto_enroll": batch_auto_enroll
+                        })
+                        if result:
+                            st.success(f"Batch setup launched for {len(proxies)} proxies!")
+                        else:
+                            st.error("Failed to start batch setup")
+                else:
+                    st.warning("Please enter at least one proxy")
