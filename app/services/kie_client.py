@@ -4,6 +4,7 @@ Kie.ai API Client for AI Video Generation
 Supports:
 - Nano Banana Pro: Image generation (9:16 for TikTok)
 - Grok Imagine: Image-to-video conversion (10s videos)
+- Seedance 1.5 Pro: Cinema-quality image-to-video (720p, 8s)
 """
 
 import os
@@ -40,13 +41,15 @@ class KieClient:
     # Model constants
     MODELS = {
         "IMAGE_GEN": "nano-banana-pro",
-        "IMAGE_TO_VIDEO": "grok-imagine/image-to-video"
+        "IMAGE_TO_VIDEO": "grok-imagine/image-to-video",
+        "SEEDANCE_VIDEO": "bytedance/seedance-1.5-pro"
     }
     
     # Pricing (for cost tracking)
     COSTS = {
-        "nano-banana-pro": 0.09,  # $0.09 per image (1K)
-        "grok-imagine/image-to-video": 0.15  # $0.15 per 10s video
+        "nano-banana-pro": 0.09,  # $0.09 per image (1K), $0.12 per image (2K)
+        "grok-imagine/image-to-video": 0.15,  # $0.15 per 10s video
+        "bytedance/seedance-1.5-pro": 0.14  # $0.14 per 720p/8s no-audio
     }
     
     def __init__(self, api_key: Optional[str] = None):
@@ -197,6 +200,67 @@ class KieClient:
                 )
         except Exception as e:
             logger.error(f"Image-to-video failed: {e}")
+            return KieTaskResult(success=False, error=str(e))
+    
+    def image_to_video_seedance(
+        self,
+        image_url: str,
+        prompt: str = "Smooth cinematic forward motion, natural walking POV, gentle camera sway",
+        aspect_ratio: str = "9:16",
+        resolution: str = "720p",
+        duration: str = "8",
+        fixed_lens: bool = False,
+        generate_audio: bool = False,
+        callback_url: Optional[str] = None
+    ) -> KieTaskResult:
+        """
+        Convert image to cinema-quality video using Seedance 1.5 Pro.
+        
+        Args:
+            image_url: URL of the source image
+            prompt: Motion/scene description (3-2500 chars)
+            aspect_ratio: "9:16" for TikTok vertical
+            resolution: "480p", "720p", or "1080p"
+            duration: "4", "8", or "12" seconds
+            fixed_lens: True for static camera, False for dynamic movement
+            generate_audio: Generate sound effects (extra cost)
+            callback_url: Optional webhook for completion
+        
+        Returns:
+            KieTaskResult with task_id for polling
+        """
+        payload = {
+            "model": self.MODELS["SEEDANCE_VIDEO"],
+            "input": {
+                "prompt": prompt,
+                "input_urls": [image_url],
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+                "duration": duration,
+                "fixed_lens": fixed_lens,
+                "generate_audio": generate_audio
+            }
+        }
+        
+        if callback_url:
+            payload["callBackUrl"] = callback_url
+        
+        try:
+            response = self._make_request_sync("/jobs/createTask", payload)
+            
+            if response.get("code") == 200:
+                return KieTaskResult(
+                    success=True,
+                    task_id=response.get("data", {}).get("taskId"),
+                    state="pending"
+                )
+            else:
+                return KieTaskResult(
+                    success=False,
+                    error=response.get("message", "Unknown error")
+                )
+        except Exception as e:
+            logger.error(f"Seedance video generation failed: {e}")
             return KieTaskResult(success=False, error=str(e))
     
     # ===========================

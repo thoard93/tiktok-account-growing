@@ -1,18 +1,17 @@
 """
-Teamwork Trend Video Generator
+Teamwork Trend Video Generator v3.0
 
 Full pipeline:
-1. Claude generates unique image prompt
-2. Nano Banana Pro creates 9:16 image
-3. Grok Imagine converts to 10s video
+1. Claude generates cinematic image prompt (master-level realism)
+2. Nano Banana Pro 2K creates 9:16 image
+3. Seedance 1.5 Pro converts to 720p 8s video (no audio)
 4. FFmpeg adds centered text overlay
-5. FFmpeg strips metadata (removes AI fingerprints)
-6. Video ready for GeeLark upload/posting
+5. FFmpeg adds random trending sound/music
+6. FFmpeg strips metadata (removes AI fingerprints)
 """
 
 import os
 import random
-import httpx
 import subprocess
 import logging
 import json
@@ -43,18 +42,18 @@ class GeneratedVideo:
 # Teamwork Content Variations
 # ===========================
 
-# Image prompt templates (for Claude to enhance)
+# Image prompt templates (fallback if Claude is unavailable)
 IMAGE_PROMPT_TEMPLATES = [
-    "POV leisurely stroll through a sun-dappled city park, golden afternoon light filtering through cherry blossom trees, warm peaceful atmosphere",
-    "POV relaxed walk along a pristine sandy beach at golden hour, soft warm sunlight, gentle ocean waves, serene coastal scenery",
-    "POV calm stroll through vibrant downtown streets, beautiful architecture, soft evening golden hour lighting, lively urban energy",
-    "POV peaceful walk through a lush forest trail, soft diffused sunlight through tall trees, rich earthy greens, tranquil woodland atmosphere",
-    "POV scenic stroll along a mountain trail overlook, breathtaking vista ahead, soft warm golden sunrise lighting, majestic peaks",
-    "POV gentle walk through Japanese garden path, soft morning light, koi pond reflections, peaceful zen atmosphere",
-    "POV relaxed stroll through autumn woods, golden maple leaves, warm soft sunlight, cozy fall atmosphere",
-    "POV calming walk along a quiet riverside path, soft golden sunset reflections on water, peaceful nature scene",
-    "POV morning stroll through lavender fields, soft purple hues, warm golden sunlight, dreamy pastoral scene",
-    "POV evening walk through a European cobblestone street, warm street lamp glow, charming old town atmosphere"
+    "Photorealistic POV walking through a sun-dappled city park, golden afternoon light filtering through cherry blossom trees, a couple walking their dog in the distance, shallow depth of field, warm tones, cinematic",
+    "Hyper-realistic POV stroll along a pristine sandy beach at golden hour, soft warm sunlight with lens flare, a jogger running far ahead on the shoreline, gentle ocean waves, natural film grain",
+    "Photorealistic POV calm walk through vibrant downtown streets at magic hour, beautiful glass skyscraper reflections, pedestrians crossing in the background, soft bokeh city lights, premium cinematic quality",
+    "Ultra-realistic POV peaceful walk through a lush forest trail, volumetric light rays through tall pine trees, a hiker with a backpack visible far ahead, rich earthy greens, shallow depth of field",
+    "Photorealistic POV scenic stroll along a mountain trail overlook at sunrise, breathtaking misty valley vista, two friends sitting on rocks in the distance, warm golden light, cinematic lens flare",
+    "Hyper-realistic POV gentle walk through Japanese garden path, soft morning light with subtle fog, an elderly couple admiring koi pond ahead, peaceful zen atmosphere, beautiful bokeh",
+    "Photorealistic POV relaxed stroll through autumn woods, golden maple leaves falling, a person walking their golden retriever far ahead on the trail, warm soft backlight, natural film grain",
+    "Ultra-realistic POV calming walk along a quiet riverside path at sunset, soft golden reflections on water, fishermen visible on the far bank, peaceful nature scene, cinematic color grading",
+    "Photorealistic POV morning stroll through lavender fields in Provence, soft purple hues stretching to horizon, a woman in a sundress walking far ahead, warm golden sunlight, shallow depth of field",
+    "Hyper-realistic POV evening walk through a European cobblestone street, warm café lights and street lamps, locals dining at sidewalk tables in the background, charming old town ambiance, premium cinematic quality"
 ]
 
 # Text overlays for videos
@@ -84,21 +83,41 @@ CAPTIONS = [
 # Hashtags (max 5, teamwork focused only)
 HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo"
 
-# Video motion prompts
+# Cinematic video motion prompts for Seedance 1.5 Pro
 VIDEO_MOTION_PROMPTS = [
-    "Smooth cinematic forward walking motion, gentle sway like a peaceful stroll, soft natural camera movement",
-    "Leisurely walking pace through the scene, calm steady glide forward, relaxed exploration motion",
-    "Gentle forward strolling motion with subtle natural sway, dreamy smooth camera movement through the scenery",
-    "Peaceful walking motion through the environment, soft cinematic camera glide, calming steady pace forward",
-    "Natural walking stroll movement, gentle bobbing motion, serene exploration of the beautiful scene"
+    "Smooth cinematic forward walking POV motion through the scene, natural gentle camera sway like a leisurely stroll, soft ambient movement with subtle parallax",
+    "Premium cinematic steady forward glide, slow natural walking pace, gentle camera bob creating immersive first-person perspective, professional steadicam feel",
+    "Smooth forward walking POV with cinematic depth, gentle natural breathing motion in camera, soft light rays shifting as perspective moves through the scene",
+    "Ultra-smooth first-person walking motion through the environment, subtle head-turn pan exploring the surroundings, natural human walking rhythm",
+    "Cinematic slow walking forward with gentle sway, soft ambient particles floating, dynamic light shifts as the camera moves through the scene naturally"
 ]
+
+# =========================================
+# MASTER CLAUDE SYSTEM PROMPT FOR REALISM
+# =========================================
+
+CLAUDE_IMAGE_SYSTEM_PROMPT = """You are a world-class cinematographer and prompt engineer specializing in photorealistic AI image generation. Your job is to create prompts that produce STUNNING, indistinguishable-from-real-life images.
+
+CRITICAL REQUIREMENTS FOR EVERY PROMPT:
+1. PHOTOREALISM: Must look like a real photograph, NOT AI-generated. Use terms: "photorealistic", "real photograph", "DSLR quality", "natural film grain"
+2. LIGHTING: Always specify premium lighting — golden hour, volumetric light rays, soft shadows, natural lens flare, warm backlighting
+3. POV PERSPECTIVE: First-person walking POV looking FORWARD at the horizon/scenery. NEVER show feet, legs, or lower body
+4. PEOPLE IN BACKGROUND: Always include 1-3 people naturally placed in the scene — pedestrians walking, joggers, couples, dog walkers, someone sitting on a bench. They should be at MEDIUM TO FAR distance, adding life without being the focus
+5. DEPTH: Shallow depth of field with background bokeh, creating cinematic depth layers
+6. CAMERA QUALITY: Shot on Sony A7IV or Canon R5, 35mm lens, f/2.8, natural color grading, subtle film grain
+7. FORMAT: 9:16 vertical composition optimized for mobile/TikTok
+8. DIVERSITY: Vary locations dramatically — city parks, beaches, forests, downtown streets, mountain trails, Japanese gardens, European villages, riverside paths, lavender fields, tropical paths, desert oases, snowy alpine trails
+9. ATMOSPHERE: Rich, immersive atmosphere — morning mist, evening glow, flower petals, falling leaves, light rain, snow flurries
+10. COLOR: Natural color palette with warm tones, NOT oversaturated. Think Kodak Portra 400 film look
+
+OUTPUT FORMAT: Just the prompt text, nothing else. Keep it under 300 words. Be specific and vivid."""
 
 
 class VideoGenerator:
     """
     Generates teamwork trend videos using AI.
     
-    Pipeline: Claude (prompt) → Nano Banana Pro (image) → Grok (video) → FFmpeg (overlay)
+    Pipeline v3: Claude (master prompt) → Nano Banana Pro 2K (image) → Seedance 1.5 Pro (video) → FFmpeg (overlay + sound)
     """
     
     def __init__(self, output_dir: Optional[str] = None):
@@ -117,7 +136,12 @@ class VideoGenerator:
         self.output_dir = Path(output_dir or os.getenv("VIDEO_OUTPUT_DIR", "./generated_videos"))
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"VideoGenerator initialized, output: {self.output_dir}")
+        # Sound directories
+        self.sounds_dir = Path(__file__).parent.parent.parent / "assets" / "sounds"
+        self.trending_sounds_dir = self.sounds_dir / "trending"
+        self.trending_sounds_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"VideoGenerator v3 initialized, output: {self.output_dir}")
     
     # ===========================
     # Claude Prompt Generation
@@ -125,38 +149,28 @@ class VideoGenerator:
     
     def generate_image_prompt_with_claude(self, style_hint: Optional[str] = None) -> str:
         """
-        Use Claude to generate a unique, creative image prompt.
+        Use Claude to generate a cinematic, photorealistic image prompt.
         
         Args:
             style_hint: Optional hint like "beach", "forest", "city"
         
         Returns:
-            Creative image prompt for Nano Banana Pro
+            Master-quality image prompt for Nano Banana Pro 2K
         """
         if not self.claude_api_key:
             # Fallback to template if no Claude API
             template = random.choice(IMAGE_PROMPT_TEMPLATES)
             if style_hint:
-                template = template.replace("nature park", style_hint)
-            return f"{template}, motivational aesthetic, 9:16 vertical format, cinematic quality, vibrant colors"
+                template = template.replace("city park", style_hint)
+            return template
         
         try:
-            system_prompt = """You are a creative prompt engineer for AI image generation. Generate short, vivid image prompts for POV leisurely stroll videos in beautiful scenic locations.
-
-CRITICAL REQUIREMENTS:
-- POV (first person) perspective looking OUT at the horizon/landscape
-- ABSOLUTELY NO feet, legs, shoes, or lower body - ONLY show distant scenery and environment
-- Camera angle should look FORWARD at the path/horizon, never down
-- Beautiful scenic locations: city parks, beaches, forests, downtown streets, mountain trails, gardens, riverside paths
-- ALWAYS include golden hour lighting, soft warm sunlight, or beautiful natural lighting
-- Rich vibrant colors and peaceful atmosphere
-- 9:16 vertical format
-
-Just output the prompt, nothing else."""
+            import httpx
             
-            user_message = f"Generate a unique POV scene prompt for a teamwork motivation video."
+            user_message = "Generate a unique, ultra-photorealistic POV scene prompt for a peaceful walking video. The scene should feel like a real moment captured on a premium camera."
             if style_hint:
-                user_message += f" Theme: {style_hint}"
+                user_message += f" Location theme: {style_hint}"
+            user_message += " Remember: include people in the background for realism."
             
             # Debug: log key presence (not the actual key)
             key_preview = self.claude_api_key[:15] + "..." if self.claude_api_key else "None"
@@ -170,9 +184,9 @@ Just output the prompt, nothing else."""
                     "anthropic-version": "2023-06-01"
                 },
                 json={
-                    "model": "claude-sonnet-4-20250514",  # Match working Discord bot
-                    "max_tokens": 200,
-                    "system": system_prompt,
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 400,
+                    "system": CLAUDE_IMAGE_SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": user_message}]
                 },
                 timeout=30
@@ -182,27 +196,20 @@ Just output the prompt, nothing else."""
             result = response.json()
             prompt = result.get("content", [{}])[0].get("text", "").strip()
             
-            # Append quality modifiers - emphasize NO FEET
-            prompt += ", 9:16 vertical format, cinematic quality, vibrant colors, NO feet or legs visible, looking forward at horizon"
-            
-            logger.info(f"Claude generated prompt: {prompt[:100]}...")
+            logger.info(f"Claude generated master prompt: {prompt[:100]}...")
             return prompt
             
-        except httpx.HTTPStatusError as e:
-            logger.warning(f"Claude API HTTP error {e.response.status_code}: {e.response.text[:200]}, using template")
-            template = random.choice(IMAGE_PROMPT_TEMPLATES)
-            return f"{template}, motivational aesthetic, 9:16 vertical format, cinematic quality"
         except Exception as e:
             logger.warning(f"Claude prompt generation failed: {e}, using template")
             template = random.choice(IMAGE_PROMPT_TEMPLATES)
-            return f"{template}, motivational aesthetic, 9:16 vertical format, cinematic quality"
+            return template
     
     def generate_video_motion_prompt(self) -> str:
-        """Generate motion prompt for video conversion."""
+        """Generate cinematic motion prompt for Seedance 1.5 Pro."""
         return random.choice(VIDEO_MOTION_PROMPTS)
     
     # ===========================
-    # FFmpeg Text Overlay
+    # FFmpeg Processing
     # ===========================
     
     def add_text_overlay(
@@ -282,21 +289,18 @@ Just output the prompt, nothing else."""
             True if successful
         """
         try:
-            # FFmpeg command to strip all metadata
-            # -map_metadata -1: Remove all global metadata
-            # -fflags +bitexact: Disable encoding metadata
-            # -flags:v +bitexact: Disable video stream metadata
-            # -flags:a +bitexact: Disable audio stream metadata
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_video_path,
-                "-map_metadata", "-1",  # Remove all metadata
-                "-fflags", "+bitexact",  # No encoder info
-                "-flags:v", "+bitexact",  # No video encoder info
-                "-flags:a", "+bitexact",  # No audio encoder info
-                "-c:v", "libx264",  # Re-encode video
-                "-c:a", "aac",  # Re-encode audio
-                "-movflags", "+faststart",  # Optimize for streaming
+                "-map_metadata", "-1",    # Strip all metadata
+                "-fflags", "+bitexact",   # Remove encoder signatures
+                "-flags:v", "+bitexact",
+                "-flags:a", "+bitexact",
+                "-c:v", "libx264",        # Re-encode video
+                "-preset", "fast",
+                "-crf", "23",
+                "-c:a", "aac",            # Re-encode audio
+                "-b:a", "128k",
                 output_video_path
             ]
             
@@ -306,15 +310,157 @@ Just output the prompt, nothing else."""
                 logger.info("Metadata stripped successfully")
                 return True
             else:
-                logger.error(f"Metadata strip error: {result.stderr}")
+                logger.error(f"Metadata strip error: {result.stderr[:200]}")
                 return False
                 
         except FileNotFoundError:
-            logger.error("FFmpeg not found - metadata strip skipped")
+            logger.error("FFmpeg not found - metadata not stripped")
             return False
         except Exception as e:
             logger.error(f"Metadata strip failed: {e}")
             return False
+    
+    # Search queries to rotate through for variety
+    SOUND_SEARCH_QUERIES = [
+        "upbeat pop music",
+        "trending beat",
+        "catchy melody loop",
+        "energetic hip hop beat",
+        "viral music tiktok",
+        "happy background music",
+        "motivational beat drop",
+        "modern trap beat",
+        "chill lofi beat",
+        "dance music electronic",
+        "acoustic guitar happy",
+        "piano emotional",
+        "cinematic inspiring music",
+        "funky groove beat",
+        "summer vibes music"
+    ]
+    
+    def _fetch_sounds_from_freesound(self, count: int = 5) -> int:
+        """
+        Fetch trending/popular sounds from Freesound.org and cache locally.
+        Uses preview-hq-mp3 URLs which don't require OAuth2.
+        
+        Args:
+            count: Number of sounds to fetch
+        
+        Returns:
+            Number of sounds successfully downloaded
+        """
+        import httpx
+        
+        api_key = os.getenv("FREESOUND_API_KEY")
+        if not api_key:
+            logger.warning("FREESOUND_API_KEY not set — cannot auto-fetch sounds")
+            return 0
+        
+        downloaded = 0
+        query = random.choice(self.SOUND_SEARCH_QUERIES)
+        
+        try:
+            # Search for music sounds, sorted by rating, filtered by duration
+            params = {
+                "query": query,
+                "token": api_key,
+                "fields": "id,name,previews,duration,avg_rating,num_downloads",
+                "filter": "duration:[5 TO 30]",  # 5-30 second clips
+                "sort": "rating_desc",
+                "page_size": 15
+            }
+            
+            logger.info(f"Fetching sounds from Freesound (query: '{query}')...")
+            
+            with httpx.Client(timeout=30) as client:
+                resp = client.get("https://freesound.org/apiv2/search/text/", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            
+            results = data.get("results", [])
+            if not results:
+                logger.warning(f"No Freesound results for query: {query}")
+                return 0
+            
+            # Pick random results from top-rated
+            selected = random.sample(results, min(count, len(results)))
+            
+            for sound in selected:
+                try:
+                    preview_url = sound.get("previews", {}).get("preview-hq-mp3")
+                    if not preview_url:
+                        continue
+                    
+                    sound_id = sound.get("id", "unknown")
+                    # Sanitize name for filename
+                    safe_name = "".join(c if c.isalnum() or c in "._- " else "" for c in sound.get("name", str(sound_id)))
+                    safe_name = safe_name.strip()[:50]
+                    filename = f"fs_{sound_id}_{safe_name}.mp3"
+                    filepath = self.trending_sounds_dir / filename
+                    
+                    # Skip if already cached
+                    if filepath.exists():
+                        logger.debug(f"Sound already cached: {filename}")
+                        downloaded += 1
+                        continue
+                    
+                    # Download preview MP3 (no auth needed for CDN links)
+                    with httpx.Client(timeout=30) as client:
+                        audio_resp = client.get(preview_url)
+                        audio_resp.raise_for_status()
+                        filepath.write_bytes(audio_resp.content)
+                    
+                    logger.info(f"Downloaded sound: {filename} ({sound.get('duration', '?')}s)")
+                    downloaded += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to download sound {sound.get('id')}: {e}")
+                    continue
+            
+        except Exception as e:
+            logger.error(f"Freesound fetch failed: {e}")
+        
+        return downloaded
+    
+    def get_random_trending_sound(self) -> Optional[Path]:
+        """
+        Pick a random trending sound. Auto-fetches from Freesound.org if cache is low.
+        Falls back to teamwork_trend.mp3 if everything fails.
+        
+        Returns:
+            Path to a random sound file, or None if none available
+        """
+        # Check cached trending sounds
+        trending_files = list(self.trending_sounds_dir.glob("*.mp3")) + \
+                         list(self.trending_sounds_dir.glob("*.wav")) + \
+                         list(self.trending_sounds_dir.glob("*.m4a"))
+        
+        # Filter out README files
+        trending_files = [f for f in trending_files if f.suffix in ('.mp3', '.wav', '.m4a')]
+        
+        # Auto-fetch if cache has fewer than 5 sounds
+        if len(trending_files) < 5:
+            fetched = self._fetch_sounds_from_freesound(count=8)
+            if fetched > 0:
+                # Refresh file list
+                trending_files = list(self.trending_sounds_dir.glob("*.mp3")) + \
+                                 list(self.trending_sounds_dir.glob("*.wav")) + \
+                                 list(self.trending_sounds_dir.glob("*.m4a"))
+        
+        if trending_files:
+            chosen = random.choice(trending_files)
+            logger.info(f"Using trending sound: {chosen.name}")
+            return chosen
+        
+        # Fall back to teamwork_trend.mp3
+        fallback = self.sounds_dir / "teamwork_trend.mp3"
+        if fallback.exists():
+            logger.info("No trending sounds found, using teamwork_trend.mp3")
+            return fallback
+        
+        logger.warning("No sound files available at all")
+        return None
     
     def add_sound_to_video(
         self,
@@ -325,48 +471,53 @@ Just output the prompt, nothing else."""
         """
         Add background sound/music to video using FFmpeg.
         
+        If no sound_path specified, picks a random trending sound.
+        
         Args:
             input_video_path: Source video (with text overlay)
             output_video_path: Output with audio
-            sound_path: Path to audio file (defaults to teamwork_trend.mp3)
+            sound_path: Path to audio file (None = random trending sound)
         
         Returns:
             True if successful
         """
         try:
-            # Default to teamwork trend sound
+            # Pick a random trending sound if none specified
             if sound_path is None:
-                # Look in assets/sounds folder
-                base_path = Path(__file__).parent.parent.parent
-                sound_path = base_path / "assets" / "sounds" / "teamwork_trend.mp3"
+                sound_file = self.get_random_trending_sound()
+                if sound_file is None:
+                    logger.warning("No sound files available, copying video without audio")
+                    import shutil
+                    shutil.copy(input_video_path, output_video_path)
+                    return True
+                sound_path = str(sound_file)
             
             sound_path = Path(sound_path)
             
             if not sound_path.exists():
                 logger.warning(f"Sound file not found: {sound_path}, skipping audio")
-                # If no sound file, just copy the video
                 import shutil
                 shutil.copy(input_video_path, output_video_path)
                 return True
             
             # FFmpeg command to mux audio with video
-            # -shortest: Crop audio to video length (handles 29s MP3 with 10s video)
+            # -shortest: Crop audio to video length
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_video_path,      # Video input
-                "-i", str(sound_path),       # Audio input (teamwork sound)
-                "-c:v", "copy",              # No re-encode video (fast)
-                "-c:a", "aac",               # TikTok-friendly audio codec
-                "-shortest",                 # Crop audio to video length
-                "-map", "0:v:0",             # Video from first input
-                "-map", "1:a:0",             # Audio from second input
+                "-i", str(sound_path),        # Audio input
+                "-c:v", "copy",               # No re-encode video (fast)
+                "-c:a", "aac",                # TikTok-friendly audio codec
+                "-shortest",                  # Crop audio to video length
+                "-map", "0:v:0",              # Video from first input
+                "-map", "1:a:0",              # Audio from second input
                 output_video_path
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
             if result.returncode == 0:
-                logger.info(f"Sound added: {sound_path.name}")
+                logger.info(f"Sound added: {sound_path.name if isinstance(sound_path, Path) else sound_path}")
                 return True
             else:
                 logger.error(f"FFmpeg audio mux error: {result.stderr[:200]}")
@@ -383,7 +534,7 @@ Just output the prompt, nothing else."""
             return False
     
     # ===========================
-    # Full Pipeline
+    # Main Video Pipeline v3
     # ===========================
     
     def generate_teamwork_video(
@@ -395,11 +546,13 @@ Just output the prompt, nothing else."""
         """
         Generate a complete teamwork trend video.
         
-        Pipeline:
-        1. Claude generates creative image prompt
-        2. Nano Banana Pro creates 9:16 image
-        3. Grok Imagine converts to 10s video
+        Pipeline v3:
+        1. Claude generates cinematic image prompt (master-level realism)
+        2. Nano Banana Pro 2K creates 9:16 image
+        3. Seedance 1.5 Pro converts to 720p 8s video (no audio)
         4. FFmpeg adds text overlay
+        5. FFmpeg adds random trending sound
+        6. FFmpeg strips metadata
         
         Args:
             style_hint: Location style hint (beach, forest, city, etc.)
@@ -411,16 +564,16 @@ Just output the prompt, nothing else."""
         """
         cost = 0.0
         
-        # 1. Generate image prompt with Claude
-        logger.info("Step 1: Generating image prompt...")
+        # 1. Generate image prompt with Claude (master-level realism)
+        logger.info("Step 1: Generating cinematic image prompt...")
         image_prompt = self.generate_image_prompt_with_claude(style_hint)
         
-        # 2. Generate image with Nano Banana Pro
-        logger.info("Step 2: Generating image with Nano Banana Pro...")
+        # 2. Generate image with Nano Banana Pro 2K
+        logger.info("Step 2: Generating 2K image with Nano Banana Pro...")
         image_result = self.kie.generate_image(
             prompt=image_prompt,
             aspect_ratio="9:16",
-            resolution="1K",
+            resolution="2K",  # Upgraded from 1K
             output_format="png"
         )
         
@@ -443,45 +596,48 @@ Just output the prompt, nothing else."""
             )
         
         image_url = image_final.result_urls[0]
-        cost += 0.09  # Nano Banana Pro cost
-        logger.info(f"Image generated: {image_url}")
+        cost += 0.12  # Nano Banana Pro 2K cost
+        logger.info(f"2K Image generated: {image_url}")
         
-        # 3. Convert to video with Grok Imagine
-        logger.info("Step 3: Converting to video with Grok Imagine...")
+        # 3. Convert to video with Seedance 1.5 Pro (720p, 8s, no audio)
+        logger.info("Step 3: Converting to cinema-quality video with Seedance 1.5 Pro...")
         video_prompt = self.generate_video_motion_prompt()
         
-        video_result = self.kie.image_to_video(
+        video_result = self.kie.image_to_video_seedance(
             image_url=image_url,
             prompt=video_prompt,
-            duration="10",
-            mode="normal"
+            aspect_ratio="9:16",
+            resolution="720p",
+            duration="8",
+            fixed_lens=False,       # Dynamic camera movement
+            generate_audio=False    # No AI audio, we add trending sound later
         )
         
         if not video_result.success:
             return GeneratedVideo(
                 success=False,
-                error=f"Video conversion failed: {video_result.error}",
+                error=f"Seedance video failed: {video_result.error}",
                 image_url=image_url,
                 prompt_used=image_prompt,
                 cost_usd=cost
             )
         
-        # Wait for video
-        logger.info(f"Waiting for video task {video_result.task_id}...")
-        video_final = self.kie.wait_for_task(video_result.task_id, timeout_seconds=300)
+        # Wait for video (Seedance can take longer)
+        logger.info(f"Waiting for Seedance video task {video_result.task_id}...")
+        video_final = self.kie.wait_for_task(video_result.task_id, timeout_seconds=600)
         
         if not video_final.success or not video_final.result_urls:
             return GeneratedVideo(
                 success=False,
-                error=f"Video conversion failed: {video_final.error or 'No result URLs'}",
+                error=f"Seedance video failed: {video_final.error or 'No result URLs'}",
                 image_url=image_url,
                 prompt_used=image_prompt,
                 cost_usd=cost
             )
         
         video_url = video_final.result_urls[0]
-        cost += 0.15  # Grok Imagine cost
-        logger.info(f"Video generated: {video_url}")
+        cost += 0.14  # Seedance 720p/8s no-audio cost
+        logger.info(f"Cinema video generated: {video_url}")
         
         # 4. Download video
         video_filename = f"teamwork_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
@@ -489,6 +645,7 @@ Just output the prompt, nothing else."""
         final_video_path = self.output_dir / video_filename
         
         try:
+            import httpx
             logger.info("Downloading video...")
             with httpx.Client(timeout=60) as client:
                 response = client.get(video_url)
@@ -510,7 +667,6 @@ Just output the prompt, nothing else."""
         overlay_video_path = self.output_dir / f"overlay_{video_filename}"
         
         if skip_overlay:
-            # Just copy raw to overlay path (will be processed for metadata)
             overlay_video_path = raw_video_path
         else:
             overlay_success = self.add_text_overlay(
@@ -527,8 +683,8 @@ Just output the prompt, nothing else."""
                 overlay_video_path = raw_video_path
                 logger.warning("Using video without text overlay")
         
-        # 6. Add teamwork sound
-        logger.info("Step 6: Adding teamwork sound...")
+        # 6. Add random trending sound
+        logger.info("Step 6: Adding trending sound...")
         sound_video_path = self.output_dir / f"sound_{video_filename}"
         sound_success = self.add_sound_to_video(
             str(overlay_video_path),
@@ -542,7 +698,7 @@ Just output the prompt, nothing else."""
         else:
             # Fallback: use video without sound
             sound_video_path = overlay_video_path
-            logger.warning("Using video without teamwork sound")
+            logger.warning("Using video without sound")
         
         # 7. Strip metadata to remove AI fingerprints
         logger.info("Step 7: Stripping metadata...")
@@ -588,33 +744,39 @@ Just output the prompt, nothing else."""
         Returns:
             List of GeneratedVideo results
         """
-        styles = style_hints or ["nature", "beach", "city", "forest", "mountain"]
         results = []
         
+        # Default diverse style hints
+        default_hints = [
+            "city park", "tropical beach", "mountain trail", "European village",
+            "Japanese garden", "autumn forest", "riverside sunset", "lavender field",
+            "snowy alpine path", "downtown at night", "botanical garden", "desert oasis"
+        ]
+        hints = style_hints or default_hints
+        
         for i in range(count):
-            style = styles[i % len(styles)]
-            logger.info(f"Generating video {i+1}/{count} (style: {style})...")
+            hint = hints[i % len(hints)]
+            logger.info(f"Generating video {i+1}/{count} (theme: {hint})...")
             
             result = self.generate_teamwork_video(
-                style_hint=style,
+                style_hint=hint,
                 skip_overlay=skip_overlay
             )
             results.append(result)
             
             if result.success:
-                logger.info(f"Video {i+1} complete: {result.video_path}")
+                logger.info(f"Video {i+1} success: {result.video_path}")
             else:
                 logger.error(f"Video {i+1} failed: {result.error}")
             
-            # Delay between generations to avoid API rate limiting
+            # Small delay between generations to avoid rate limits
             if i < count - 1:
-                logger.info(f"Waiting 10s before next video...")
-                time.sleep(10)
+                time.sleep(2)
         
         return results
     
     # ===========================
-    # Caption/Hashtag Helpers
+    # TikTok Content Helpers
     # ===========================
     
     @staticmethod

@@ -308,10 +308,13 @@ class AutomationScheduler:
     def run_auto_posting(self):
         """
         Post generated videos to all scheduled posting accounts.
-        Uses the /api/videos/post/batch endpoint internally.
+        
+        STAGGERED POSTING: Splits available videos evenly across posting time slots.
+        e.g., with 3 videos and slots at 10, 1, 5 → posts 1 video per slot.
+        Uses current UTC hour to determine which slot is firing.
         """
         logger.info("=" * 50)
-        logger.info("PIPELINE PHASE 3: Auto-Posting")
+        logger.info("PIPELINE PHASE 3: Auto-Posting (Staggered)")
         logger.info("=" * 50)
         
         config = self._get_config()
@@ -333,8 +336,27 @@ class AutomationScheduler:
                 logger.warning("Scheduled accounts have no phone IDs")
                 return
             
+            # Determine which time slot we're in (for staggered posting)
+            posting_hours_str = config["posting_hours_est"]
+            posting_hours = [int(h.strip()) for h in posting_hours_str.split(",")]
+            num_slots = len(posting_hours)
+            
+            # Get current EST hour to match against slots
+            from datetime import datetime, timezone, timedelta
+            est = timezone(timedelta(hours=-5))
+            current_est_hour = datetime.now(est).hour
+            
+            # Find which slot index we're closest to
+            slot_index = 0
+            for i, h in enumerate(posting_hours):
+                if abs(current_est_hour - h) <= 1:  # Within 1 hour tolerance
+                    slot_index = i
+                    break
+            
+            logger.info(f"Posting slot {slot_index + 1}/{num_slots} (EST hour: {current_est_hour}, slots: {posting_hours})")
+            
             self._log_pipeline(db, "posting", "started",
-                               details={"phone_count": len(phone_ids)})
+                               details={"phone_count": len(phone_ids), "slot": slot_index + 1, "total_slots": num_slots})
             
             start_time = time.time()
             
@@ -347,20 +369,41 @@ class AutomationScheduler:
                 raise Exception(f"Failed to get video list: {videos_resp.status_code}")
             
             videos_data = videos_resp.json()
-            video_filenames = [v["filename"] for v in videos_data.get("videos", [])]
+            all_video_filenames = [v["filename"] for v in videos_data.get("videos", [])]
             
-            if not video_filenames:
+            if not all_video_filenames:
                 logger.warning("No videos available for posting")
                 self._log_pipeline(db, "posting", "skipped",
                                    details={"reason": "no_videos_available"})
                 return
             
-            # Post videos to phones
-            posts_per = config["posts_per_phone"]
+            # STAGGER: Calculate this slot's share of videos
+            posts_per_phone = config["posts_per_phone"]
+            total_posts_today = posts_per_phone * len(phone_ids)
+            posts_per_slot = max(1, total_posts_today // num_slots)
+            
+            # Calculate which videos belong to this slot
+            slot_start = slot_index * posts_per_slot * len(phone_ids)
+            slot_end = slot_start + posts_per_slot * len(phone_ids)
+            slot_videos = all_video_filenames[slot_start:slot_end]
+            
+            # If last slot, take any remaining videos too
+            if slot_index == num_slots - 1:
+                slot_videos = all_video_filenames[slot_start:]
+            
+            if not slot_videos:
+                logger.info(f"Slot {slot_index + 1}: No videos left for this time slot")
+                self._log_pipeline(db, "posting", "skipped",
+                                   details={"reason": "no_videos_for_slot", "slot": slot_index + 1})
+                return
+            
+            logger.info(f"Slot {slot_index + 1}: Posting {len(slot_videos)} videos to {len(phone_ids)} phones")
+            
+            # Post this slot's videos to phones
             post_resp = requests.post(
                 f"{internal_base}/api/videos/post/batch",
                 json={
-                    "videos": video_filenames[:posts_per * len(phone_ids)],
+                    "videos": slot_videos,
                     "phone_ids": phone_ids,
                     "caption": "",
                     "hashtags": "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo",
@@ -380,11 +423,13 @@ class AutomationScheduler:
                 self._log_pipeline(db, "posting", "completed",
                                    details={
                                        "job_id": job_id,
-                                       "videos_count": len(video_filenames),
+                                       "videos_posted": len(slot_videos),
+                                       "total_available": len(all_video_filenames),
+                                       "slot": slot_index + 1,
                                        "phone_count": len(phone_ids),
                                    },
                                    duration=duration)
-                logger.info(f"Posting job started: {job_id}")
+                logger.info(f"Posting job started: {job_id} (slot {slot_index + 1}/{num_slots}, {len(slot_videos)} videos)")
             else:
                 raise Exception(f"Posting failed: {post_resp.status_code} - {post_resp.text}")
             
