@@ -180,15 +180,21 @@ class AutomationScheduler:
                     # Wait for phone boot
                     time.sleep(30)
                     
-                    # Run warmup flow (browse TikTok for 15-30 min)
-                    from app.services.warmup_service import WarmupService
-                    warmup_svc = WarmupService(db, self.geelark)
-                    warmup_svc.run_single_warmup(
-                        phone_id=phone_id,
+                    # Run warmup flow via GeeLark API directly
+                    warmup_resp = self.geelark.run_tiktok_warmup(
+                        phone_ids=[phone_id],
+                        duration_minutes=20,
                         action="search video",
-                        keywords=["teamwork trend", "teamwork challenge"],
-                        duration_minutes=20
+                        keywords=["teamwork trend", "teamwork challenge"]
                     )
+                    if not warmup_resp.success:
+                        raise Exception(f"Warmup task failed: {warmup_resp.message}")
+                    
+                    task_id = warmup_resp.data.get("taskId") if warmup_resp.data else None
+                    logger.info(f"    Warmup task submitted: {task_id}")
+                    
+                    # Wait briefly then move on - warmup runs asynchronously
+                    time.sleep(60)
                     
                     duration = time.time() - start_time
                     self._log_pipeline(db, "warmup", "completed",
@@ -333,10 +339,8 @@ class AutomationScheduler:
             start_time = time.time()
             
             import requests
-            # Get available videos
-            api_base = os.getenv("API_BASE_URL", "http://localhost:8000")
-            # Use internal URL for server-to-server calls
-            internal_base = os.getenv("INTERNAL_API_URL", api_base)
+            # Use Render external URL or fall back to localhost
+            internal_base = os.getenv("RENDER_EXTERNAL_URL", os.getenv("API_BASE_URL", "http://localhost:8000")).rstrip("/")
             
             videos_resp = requests.get(f"{internal_base}/api/videos/list", timeout=10)
             if videos_resp.status_code != 200:
