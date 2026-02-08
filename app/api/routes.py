@@ -2051,3 +2051,64 @@ async def trigger_pipeline_phase(phase: str):
         return {"success": True, "message": f"Pipeline phase '{phase}' triggered"}
     else:
         raise HTTPException(404, f"Job not found: {job_map[phase]}")
+
+
+@router.post("/accounts/sync-geelark", tags=["Accounts"])
+async def sync_accounts_from_geelark(
+    geelark: GeeLarkClient = Depends(get_geelark_client),
+    db: Session = Depends(get_db)
+):
+    """
+    Sync GeeLark phones into the accounts table.
+    Creates Account records for any phones that don't have one yet.
+    This ensures all GeeLark phones appear on the Accounts scheduling page.
+    """
+    # Fetch all phones from GeeLark
+    response = geelark.list_phones(page=1, page_size=100)
+    if not response.success:
+        raise HTTPException(502, f"Failed to fetch GeeLark phones: {response.message}")
+    
+    phones = response.data if isinstance(response.data, list) else response.data.get("items", []) if isinstance(response.data, dict) else []
+    
+    created = 0
+    updated = 0
+    
+    for phone in phones:
+        phone_id = phone.get("id") or phone.get("phoneId")
+        if not phone_id:
+            continue
+        
+        name = phone.get("serialName") or phone.get("name") or f"Phone {phone_id[:8]}"
+        
+        # Check if account exists for this phone
+        account = db.query(Account).filter(Account.geelark_profile_id == phone_id).first()
+        
+        if not account:
+            # Create new account record
+            account = Account(
+                geelark_profile_id=phone_id,
+                geelark_profile_name=name,
+                status=AccountStatus.CREATED,
+                schedule_enabled=False,
+                schedule_warmup=True,
+                schedule_posting=True,
+            )
+            db.add(account)
+            created += 1
+        else:
+            # Update name if changed
+            if account.geelark_profile_name != name:
+                account.geelark_profile_name = name
+                updated += 1
+    
+    db.commit()
+    
+    total = db.query(Account).count()
+    
+    return {
+        "success": True,
+        "created": created,
+        "updated": updated,
+        "total_accounts": total,
+        "phones_found": len(phones),
+    }
