@@ -251,6 +251,29 @@ async def batch_create_accounts(
     return accounts
 
 
+@router.get("/accounts/scheduled", tags=["Accounts"])
+async def get_scheduled_accounts(db: Session = Depends(get_db)):
+    """Get all accounts with their scheduling status."""
+    accounts = db.query(Account).order_by(Account.id).all()
+    
+    return {
+        "accounts": [
+            {
+                "id": a.id,
+                "name": a.geelark_profile_name or f"Account #{a.id}",
+                "phone_id": a.geelark_profile_id,
+                "tiktok_username": a.tiktok_username,
+                "status": a.status.value if a.status else "unknown",
+                "schedule_enabled": a.schedule_enabled or False,
+                "schedule_warmup": a.schedule_warmup if a.schedule_warmup is not None else True,
+                "schedule_posting": a.schedule_posting if a.schedule_posting is not None else True,
+                "last_activity": a.last_activity.isoformat() if a.last_activity else None,
+            }
+            for a in accounts
+        ]
+    }
+
+
 @router.get("/accounts/{account_id}", response_model=AccountResponse, tags=["Accounts"])
 async def get_account(account_id: int, db: Session = Depends(get_db)):
     """Get account details."""
@@ -1985,27 +2008,7 @@ async def update_account_schedule(
     }
 
 
-@router.get("/accounts/scheduled")
-async def get_scheduled_accounts(db: Session = Depends(get_db)):
-    """Get all accounts with their scheduling status."""
-    accounts = db.query(Account).order_by(Account.id).all()
-    
-    return {
-        "accounts": [
-            {
-                "id": a.id,
-                "name": a.geelark_profile_name or f"Account #{a.id}",
-                "phone_id": a.geelark_profile_id,
-                "tiktok_username": a.tiktok_username,
-                "status": a.status.value if a.status else "unknown",
-                "schedule_enabled": a.schedule_enabled or False,
-                "schedule_warmup": a.schedule_warmup if a.schedule_warmup is not None else True,
-                "schedule_posting": a.schedule_posting if a.schedule_posting is not None else True,
-                "last_activity": a.last_activity.isoformat() if a.last_activity else None,
-            }
-            for a in accounts
-        ]
-    }
+
 
 
 @router.post("/accounts/schedule/bulk")
