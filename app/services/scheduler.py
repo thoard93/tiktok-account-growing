@@ -128,10 +128,12 @@ class AutomationScheduler:
     def run_daily_warmup(self):
         """
         Run warmup for all accounts with schedule_enabled + schedule_warmup.
-        Each account's GeeLark phone is started, warmup flow is run, then stopped.
+        
+        PARALLEL: All phones start at once, warmup tasks submitted in one batch,
+        phones auto-stop after warmup duration completes.
         """
         logger.info("=" * 50)
-        logger.info("PIPELINE PHASE 1: Daily Warmup")
+        logger.info("PIPELINE PHASE 1: Daily Warmup (Parallel)")
         logger.info("=" * 50)
         
         config = self._get_config()
@@ -152,82 +154,124 @@ class AutomationScheduler:
                                    details={"reason": "no_accounts_scheduled"})
                 return
             
-            logger.info(f"Warming up {len(accounts)} accounts")
-            self._log_pipeline(db, "warmup", "started",
-                               details={"account_count": len(accounts)})
-            
-            success_count = 0
-            fail_count = 0
-            
+            # Collect all valid phone IDs
+            phone_ids = []
+            phone_names = {}
             for account in accounts:
-                phone_id = account.geelark_profile_id
+                pid = account.geelark_profile_id
                 name = account.geelark_profile_name or f"Account #{account.id}"
-                
-                if not phone_id:
+                if pid:
+                    phone_ids.append(pid)
+                    phone_names[pid] = name
+                else:
                     logger.warning(f"Skipping {name} — no GeeLark phone ID")
-                    fail_count += 1
-                    continue
-                
-                start_time = time.time()
-                try:
-                    logger.info(f"  → Warmup: {name} ({phone_id})")
-                    
-                    # Start the phone
-                    start_resp = self.geelark.start_phones([phone_id])
-                    if not start_resp.success:
-                        raise Exception(f"Failed to start phone: {start_resp.message}")
-                    
-                    # Wait for phone boot
-                    time.sleep(30)
-                    
-                    # Run warmup flow via GeeLark API directly
-                    warmup_resp = self.geelark.run_tiktok_warmup(
-                        phone_ids=[phone_id],
-                        duration_minutes=20,
-                        action="search video",
-                        keywords=["teamwork trend", "teamwork challenge"]
-                    )
-                    if not warmup_resp.success:
-                        raise Exception(f"Warmup task failed: {warmup_resp.message}")
-                    
-                    task_id = warmup_resp.data.get("taskId") if warmup_resp.data else None
-                    logger.info(f"    Warmup task submitted: {task_id}")
-                    
-                    # Wait briefly then move on - warmup runs asynchronously
-                    time.sleep(60)
-                    
-                    duration = time.time() - start_time
-                    self._log_pipeline(db, "warmup", "completed",
-                                       phone_id=phone_id, account_name=name,
-                                       duration=duration)
-                    success_count += 1
-                    logger.info(f"  ✓ Warmup complete: {name} ({duration:.0f}s)")
-                    
-                except Exception as e:
-                    duration = time.time() - start_time
-                    self._log_pipeline(db, "warmup", "failed",
-                                       phone_id=phone_id, account_name=name,
-                                       error=str(e), duration=duration)
-                    fail_count += 1
-                    logger.error(f"  ✗ Warmup failed for {name}: {e}")
-                
-                finally:
-                    # Always try to stop the phone after warmup
-                    try:
-                        self.geelark.stop_phones([phone_id])
-                    except Exception:
-                        pass
-                    
-                    # Small delay between accounts
-                    time.sleep(5)
             
-            logger.info(f"Warmup phase complete: {success_count} success, {fail_count} failed")
+            if not phone_ids:
+                logger.warning("No valid phone IDs for warmup")
+                self._log_pipeline(db, "warmup", "skipped",
+                                   details={"reason": "no_phone_ids"})
+                return
+            
+            logger.info(f"Starting warmup for {len(phone_ids)} phones in parallel")
+            self._log_pipeline(db, "warmup", "started",
+                               details={"account_count": len(phone_ids),
+                                        "phones": list(phone_names.values())})
+            
+            warmup_duration_min = 20
+            start_time = time.time()
+            
+            # === STEP 1: Boot ALL phones at once ===
+            logger.info(f"  → Starting {len(phone_ids)} phones simultaneously...")
+            try:
+                start_resp = self.geelark.start_phones(phone_ids)
+                if not start_resp.success:
+                    raise Exception(f"Batch phone start failed: {start_resp.message}")
+                logger.info(f"  ✓ All {len(phone_ids)} phones starting up")
+            except Exception as e:
+                logger.error(f"  ✗ Failed to start phones: {e}")
+                self._log_pipeline(db, "warmup", "failed", error=str(e))
+                return
+            
+            # Wait once for all phones to boot (not per-phone)
+            logger.info("  → Waiting 35s for all phones to boot...")
+            time.sleep(35)
+            
+            # === STEP 2: Submit warmup tasks for ALL phones in one batch ===
+            logger.info(f"  → Submitting warmup tasks for all {len(phone_ids)} phones...")
+            try:
+                warmup_resp = self.geelark.run_tiktok_warmup(
+                    phone_ids=phone_ids,
+                    duration_minutes=warmup_duration_min,
+                    action="search video",
+                    keywords=["teamwork trend", "teamwork challenge", "teamwork"]
+                )
+                if not warmup_resp.success:
+                    raise Exception(f"Batch warmup submit failed: {warmup_resp.message}")
+                
+                task_id = warmup_resp.data.get("taskId") if warmup_resp.data else None
+                logger.info(f"  ✓ Warmup tasks submitted for all phones (task: {task_id})")
+                
+            except Exception as e:
+                logger.error(f"  ✗ Warmup task submission failed: {e}")
+                self._log_pipeline(db, "warmup", "failed", error=str(e))
+                # Still try to stop phones on failure
+                try:
+                    self.geelark.stop_phones(phone_ids)
+                except Exception:
+                    pass
+                return
+            
+            # === STEP 3: Schedule delayed phone stop (after warmup completes) ===
+            stop_delay_seconds = (warmup_duration_min + 5) * 60  # warmup + 5 min buffer
+            
+            try:
+                from datetime import datetime, timedelta
+                stop_time = datetime.now() + timedelta(seconds=stop_delay_seconds)
+                
+                self.scheduler.add_job(
+                    self._stop_warmup_phones,
+                    trigger='date',
+                    run_date=stop_time,
+                    args=[phone_ids],
+                    id=f"warmup_stop_{int(time.time())}",
+                    replace_existing=False,
+                    max_instances=1
+                )
+                logger.info(f"  ✓ Phone auto-stop scheduled in {warmup_duration_min + 5} minutes")
+                
+            except Exception as e:
+                logger.warning(f"Failed to schedule delayed stop: {e} — phones will need manual stop")
+            
+            duration = time.time() - start_time
+            self._log_pipeline(db, "warmup", "completed",
+                               details={
+                                   "phone_count": len(phone_ids),
+                                   "warmup_duration_min": warmup_duration_min,
+                                   "task_id": task_id,
+                                   "auto_stop_in_min": warmup_duration_min + 5
+                               },
+                               duration=duration)
+            
+            logger.info(f"Warmup phase complete: {len(phone_ids)} phones warming up in parallel")
+            logger.info(f"  Phones will auto-stop in {warmup_duration_min + 5} minutes")
             
         except Exception as e:
             logger.error(f"Warmup phase crashed: {e}")
             self._log_pipeline(db, "warmup", "failed", error=str(e))
         finally:
             db.close()
+    
+    def _stop_warmup_phones(self, phone_ids: list):
+        """Callback to stop phones after warmup duration completes."""
+        logger.info(f"Auto-stopping {len(phone_ids)} phones after warmup...")
+        try:
+            resp = self.geelark.stop_phones(phone_ids)
+            if resp.success:
+                logger.info(f"  ✓ {len(phone_ids)} phones stopped successfully")
+            else:
+                logger.warning(f"  ⚠ Phone stop response: {resp.message}")
+        except Exception as e:
+            logger.error(f"  ✗ Failed to stop warmup phones: {e}")
     
     # =====================================================================
     # Phase 2: Daily Video Generation
