@@ -1219,26 +1219,18 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
     try:
         with _video_jobs_lock:
             _video_jobs[job_id]["status"] = "running"
-            _video_jobs[job_id]["message"] = f"Generating {count} video(s)..."
+            _video_jobs[job_id]["message"] = f"Generating {count} video(s) from stock footage..."
         
-        logger.info(f"[Job {job_id}] Starting generation of {count} video(s), style={style}")
+        logger.info(f"[Job {job_id}] Starting stock footage generation of {count} video(s)")
         generator = get_video_generator()
         
-        if count == 1:
-            logger.info(f"[Job {job_id}] Single video mode")
-            result = generator.generate_teamwork_video(
-                style_hint=style,
-                text_overlay=text_overlay,
-                skip_overlay=skip_overlay
+        results = []
+        for i in range(count):
+            logger.info(f"[Job {job_id}] Generating video {i+1}/{count} from stock footage...")
+            result = generator.generate_stock_video(
+                text_overlay=text_overlay if text_overlay else None
             )
-            results = [result]
-        else:
-            logger.info(f"[Job {job_id}] Batch mode: generating {count} videos with 10s delay between each")
-            results = generator.generate_batch(
-                count=count,
-                style_hints=[style] if style else None,
-                skip_overlay=skip_overlay
-            )
+            results.append(result)
         
         # Log results summary
         success_count = sum(1 for r in results if r.success)
@@ -1278,9 +1270,10 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
 @router.post("/videos/generate")
 async def generate_teamwork_video(data: dict):
     """
-    Start video generation job (returns immediately).
+    Start video generation job using FREE stock footage (Pexels).
     
-    Pipeline: Claude prompt → Nano Banana Pro image → Grok video → FFmpeg overlay
+    Pipeline: Pexels stock clip → FFmpeg crop → text overlay → sound → strip metadata
+    Cost: $0.00 per video
     
     Returns a job_id to poll with /videos/job/{job_id}
     """

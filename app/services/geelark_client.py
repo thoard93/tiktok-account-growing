@@ -1074,6 +1074,7 @@ class GeeLarkClient:
         keywords: Optional[List[str]] = None,
         enable_comments: bool = True,
         enable_likes: bool = True,
+        enable_follow_back: bool = True,
         comment_prompt: str = "Short positive teamwork comment",
         like_probability: int = 30,
         schedule_at: Optional[int] = None
@@ -1081,7 +1082,7 @@ class GeeLarkClient:
         """
         Run enhanced warmup with chained templates.
         
-        Chains: AI Warmup -> AI Comments -> Random Like
+        Chains: AI Warmup -> AI Comments -> Random Like -> Auto Follow-Back
         
         Args:
             phone_ids: List of phone IDs
@@ -1089,6 +1090,7 @@ class GeeLarkClient:
             keywords: Search keywords for trend focus
             enable_comments: Chain AI comment generator
             enable_likes: Chain random like template
+            enable_follow_back: Chain auto follow-back (follows new followers)
             comment_prompt: AI prompt for relevant comments
             like_probability: Percentage chance to like (0-100)
             schedule_at: Base schedule time (chains are staggered)
@@ -1107,6 +1109,7 @@ class GeeLarkClient:
             "comment_task": None,
             "like_task": None,
             "comment_like_task": None,
+            "follow_back_task": None,
             "success": True,
             "errors": []
         }
@@ -1210,6 +1213,29 @@ class GeeLarkClient:
                 logger.info(f"Comment likes chained: {comment_like_response.data}")
             except Exception as e:
                 results["errors"].append(f"Comment likes failed: {e}")
+        
+        # 5. Chain Auto Follow-Back (follows people who followed us)
+        if enable_follow_back:
+            try:
+                # Schedule follow-back to start 60% through warmup
+                follow_start = schedule_at + int(duration_minutes * 60 * 0.6)
+                
+                follow_variables = {
+                    "action": "browse video",
+                    "duration": 10,  # 10 min following back
+                }
+                
+                follow_response = self.add_task(
+                    phone_ids=phone_ids,
+                    task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
+                    variables=follow_variables,
+                    schedule_at=follow_start,
+                    plan_name=self.MARKETPLACE_TEMPLATES["AUTO_FOLLOW"]
+                )
+                results["follow_back_task"] = follow_response.data
+                logger.info(f"Follow-back chained: {follow_response.data}")
+            except Exception as e:
+                results["errors"].append(f"Follow-back failed: {e}")
         
         return results
     

@@ -1059,42 +1059,34 @@ class VideoGenerator:
         skip_overlay: bool = False
     ) -> List[GeneratedVideo]:
         """
-        Generate multiple teamwork videos.
+        Generate multiple videos using FREE stock footage (Pexels).
+        Each video uses a unique clip to prevent duplicate content violations.
         
         Args:
             count: Number of videos to generate
-            style_hints: List of style hints to cycle through
-            skip_overlay: Skip FFmpeg overlay step
+            style_hints: Ignored (kept for API compatibility)
+            skip_overlay: Ignored (kept for API compatibility)
         
         Returns:
             List of GeneratedVideo results
         """
         results = []
         
-        # Default diverse style hints
-        default_hints = [
-            "city park", "tropical beach", "mountain trail", "European village",
-            "Japanese garden", "autumn forest", "riverside sunset", "lavender field",
-            "snowy alpine path", "downtown at night", "botanical garden", "desert oasis"
-        ]
-        hints = style_hints or default_hints
+        # Reset used clips for fresh batch uniqueness
+        self._used_clips.clear()
         
         for i in range(count):
-            hint = hints[i % len(hints)]
-            logger.info(f"Generating video {i+1}/{count} (theme: {hint})...")
+            logger.info(f"Generating stock video {i+1}/{count}...")
             
-            result = self.generate_teamwork_video(
-                style_hint=hint,
-                skip_overlay=skip_overlay
-            )
+            result = self.generate_stock_video()
             results.append(result)
             
             if result.success:
-                logger.info(f"Video {i+1} success: {result.video_path}")
+                logger.info(f"Video {i+1} success: {result.video_path} ($0.00)")
             else:
                 logger.error(f"Video {i+1} failed: {result.error}")
             
-            # Small delay between generations to avoid rate limits
+            # Small delay between generations
             if i < count - 1:
                 time.sleep(2)
         
