@@ -213,9 +213,43 @@ class AutomationScheduler:
                 self._log_pipeline(db, "warmup", "failed", error=str(e))
                 return
             
-            # Wait once for all phones to boot (not per-phone)
-            logger.info("  → Waiting 35s for all phones to boot...")
-            time.sleep(35)
+            # Wait for all phones to fully boot (poll status instead of fixed sleep)
+            # GeeLark docs: phones take 60-120s to reach status 0 (Started)
+            logger.info("  → Waiting for all phones to boot (polling status)...")
+            max_wait_seconds = 150
+            poll_interval = 10
+            elapsed = 0
+            all_ready = False
+            
+            while elapsed < max_wait_seconds:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                
+                try:
+                    status_resp = self.geelark.get_phone_status(phone_ids)
+                    if status_resp.success and status_resp.data:
+                        # Check all phones for status 0 (Started)
+                        details = status_resp.data.get("successDetails", status_resp.data.get("data", []))
+                        if isinstance(details, list) and len(details) > 0:
+                            statuses = [d.get("status", d.get("openStatus", -1)) for d in details]
+                            started_count = sum(1 for s in statuses if s == 0)
+                            logger.info(f"    Boot check ({elapsed}s): {started_count}/{len(phone_ids)} phones ready")
+                            
+                            if started_count >= len(phone_ids):
+                                all_ready = True
+                                break
+                        else:
+                            logger.debug(f"    Boot check ({elapsed}s): waiting for status response...")
+                except Exception as e:
+                    logger.debug(f"    Boot check ({elapsed}s): status poll error: {e}")
+            
+            if all_ready:
+                logger.info(f"  ✓ All {len(phone_ids)} phones booted in {elapsed}s")
+            else:
+                logger.warning(f"  ⚠ Not all phones confirmed ready after {max_wait_seconds}s, proceeding anyway")
+            
+            # Extra 5s settle time after boot
+            time.sleep(5)
             
             # === STEP 2: Submit enhanced warmup (warmup + comments + likes) ===
             logger.info(f"  → Submitting enhanced warmup + comments for all {len(phone_ids)} phones...")
