@@ -2056,6 +2056,17 @@ async def trigger_pipeline_phase(phase: str):
         raise HTTPException(404, f"Job not found: {job_map[phase]}")
 
 
+@router.post("/pipeline/warmup/stop")
+async def stop_warmup_now():
+    """Manually stop all currently warming up phones immediately."""
+    from app.services.scheduler import get_scheduler
+    scheduler = get_scheduler()
+    if not scheduler:
+        raise HTTPException(503, "Scheduler not initialized")
+    
+    result = scheduler.stop_warmup_now()
+    return {"success": True, **result}
+
 @router.post("/accounts/sync-geelark", tags=["Accounts"])
 async def sync_accounts_from_geelark(
     geelark: GeeLarkClient = Depends(get_geelark_client),

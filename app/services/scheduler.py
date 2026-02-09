@@ -180,6 +180,27 @@ class AutomationScheduler:
             warmup_duration_min = 20
             start_time = time.time()
             
+            # Teamwork engagement comment prompts — varied and organic
+            import random
+            comment_prompts = [
+                "teamworkkk 🔥🔥",
+                "lets go teamwork 💪",
+                "here to support ❤️",
+                "teamwork makes the dream work",
+                "this is what teamwork looks like 🙌",
+                "love this energy",
+                "squad goals 💯",
+                "nothing beats good teamwork",
+                "this is fire 🔥",
+                "the teamwork trend is everything",
+                "goals right here 👏",
+                "we love teamwork content",
+                "keep it up 🤝",
+                "teamwork all day 💪🔥",
+                "this hits different",
+            ]
+            comment_prompt = random.choice(comment_prompts)
+            
             # === STEP 1: Boot ALL phones at once ===
             logger.info(f"  → Starting {len(phone_ids)} phones simultaneously...")
             try:
@@ -196,23 +217,36 @@ class AutomationScheduler:
             logger.info("  → Waiting 35s for all phones to boot...")
             time.sleep(35)
             
-            # === STEP 2: Submit warmup tasks for ALL phones in one batch ===
-            logger.info(f"  → Submitting warmup tasks for all {len(phone_ids)} phones...")
+            # === STEP 2: Submit enhanced warmup (warmup + comments + likes) ===
+            logger.info(f"  → Submitting enhanced warmup + comments for all {len(phone_ids)} phones...")
             try:
-                warmup_resp = self.geelark.run_tiktok_warmup(
+                warmup_result = self.geelark.run_enhanced_warmup(
                     phone_ids=phone_ids,
                     duration_minutes=warmup_duration_min,
-                    action="search video",
-                    keywords=["teamwork trend", "teamwork challenge", "teamwork"]
+                    keywords=["teamwork trend", "teamwork challenge", "teamwork"],
+                    enable_comments=True,
+                    enable_likes=True,
+                    comment_prompt=comment_prompt,
+                    like_probability=30
                 )
-                if not warmup_resp.success:
-                    raise Exception(f"Batch warmup submit failed: {warmup_resp.message}")
                 
-                task_id = warmup_resp.data.get("taskId") if warmup_resp.data else None
-                logger.info(f"  ✓ Warmup tasks submitted for all phones (task: {task_id})")
+                if not warmup_result.get("success"):
+                    errors = warmup_result.get("errors", [])
+                    raise Exception(f"Enhanced warmup failed: {errors}")
+                
+                task_id = None
+                if warmup_result.get("warmup_task"):
+                    task_id = warmup_result["warmup_task"].get("taskId") if isinstance(warmup_result["warmup_task"], dict) else None
+                
+                logger.info(f"  ✓ Enhanced warmup submitted (warmup + comments + likes)")
+                logger.info(f"    Comment prompt: '{comment_prompt}'")
+                if warmup_result.get("comment_task"):
+                    logger.info(f"    Comment task: {warmup_result['comment_task']}")
+                if warmup_result.get("like_task"):
+                    logger.info(f"    Like task: {warmup_result['like_task']}")
                 
             except Exception as e:
-                logger.error(f"  ✗ Warmup task submission failed: {e}")
+                logger.error(f"  ✗ Enhanced warmup submission failed: {e}")
                 self._log_pipeline(db, "warmup", "failed", error=str(e))
                 # Still try to stop phones on failure
                 try:
@@ -220,6 +254,9 @@ class AutomationScheduler:
                 except Exception:
                     pass
                 return
+            
+            # Track active warmup phones for manual stop
+            self._active_warmup_phones = phone_ids.copy()
             
             # === STEP 3: Schedule delayed phone stop (after warmup completes) ===
             stop_delay_seconds = (warmup_duration_min + 5) * 60  # warmup + 5 min buffer
@@ -248,11 +285,12 @@ class AutomationScheduler:
                                    "phone_count": len(phone_ids),
                                    "warmup_duration_min": warmup_duration_min,
                                    "task_id": task_id,
+                                   "comment_prompt": comment_prompt,
                                    "auto_stop_in_min": warmup_duration_min + 5
                                },
                                duration=duration)
             
-            logger.info(f"Warmup phase complete: {len(phone_ids)} phones warming up in parallel")
+            logger.info(f"Warmup phase complete: {len(phone_ids)} phones warming up + commenting in parallel")
             logger.info(f"  Phones will auto-stop in {warmup_duration_min + 5} minutes")
             
         except Exception as e:
@@ -272,6 +310,42 @@ class AutomationScheduler:
                 logger.warning(f"  ⚠ Phone stop response: {resp.message}")
         except Exception as e:
             logger.error(f"  ✗ Failed to stop warmup phones: {e}")
+        finally:
+            self._active_warmup_phones = []
+    
+    def stop_warmup_now(self):
+        """
+        Manually stop all currently warming up phones immediately.
+        Cancels the scheduled auto-stop job too.
+        """
+        phone_ids = getattr(self, '_active_warmup_phones', [])
+        if not phone_ids:
+            logger.info("No active warmup phones to stop")
+            return {"stopped": 0, "message": "No active warmup phones"}
+        
+        logger.info(f"Manual warmup stop: stopping {len(phone_ids)} phones...")
+        
+        # Cancel any pending auto-stop jobs
+        try:
+            for job in self.scheduler.get_jobs():
+                if job.id.startswith("warmup_stop_"):
+                    job.remove()
+                    logger.info(f"  Cancelled scheduled stop job: {job.id}")
+        except Exception as e:
+            logger.warning(f"Failed to cancel auto-stop jobs: {e}")
+        
+        # Stop the phones
+        try:
+            resp = self.geelark.stop_phones(phone_ids)
+            self._active_warmup_phones = []
+            if resp.success:
+                logger.info(f"  ✓ {len(phone_ids)} phones stopped manually")
+                return {"stopped": len(phone_ids), "message": f"Stopped {len(phone_ids)} phones"}
+            else:
+                return {"stopped": 0, "message": f"Stop failed: {resp.message}"}
+        except Exception as e:
+            logger.error(f"  ✗ Manual stop failed: {e}")
+            return {"stopped": 0, "message": f"Error: {e}"}
     
     # =====================================================================
     # Phase 2: Daily Video Generation
