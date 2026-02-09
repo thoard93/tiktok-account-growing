@@ -353,11 +353,12 @@ class AutomationScheduler:
     
     def run_daily_video_generation(self):
         """
-        Generate AI teamwork videos for all scheduled posting accounts.
+        Generate teamwork videos using FREE stock footage (Pexels).
+        Falls back to AI generation if stock footage unavailable.
         Videos per account = posts_per_phone from config.
         """
         logger.info("=" * 50)
-        logger.info("PIPELINE PHASE 2: Video Generation")
+        logger.info("PIPELINE PHASE 2: Video Generation (Stock Footage)")
         logger.info("=" * 50)
         
         config = self._get_config()
@@ -387,13 +388,20 @@ class AutomationScheduler:
             from app.services.video_generator import get_video_generator
             generator = get_video_generator()
             
-            style_hints = ["nature", "beach", "city", "sunset", "mountains",
-                          "forest", "ocean", "snow", "desert", "garden"]
-            results = generator.generate_batch(
-                count=videos_needed,
-                style_hints=style_hints[:videos_needed],
-                skip_overlay=False
-            )
+            # Use stock footage pipeline (FREE) as primary
+            results = []
+            for i in range(videos_needed):
+                try:
+                    result = generator.generate_stock_video()
+                    results.append(result)
+                    if result.success:
+                        logger.info(f"  Video {i+1}/{videos_needed}: ✓ {result.video_path}")
+                    else:
+                        logger.warning(f"  Video {i+1}/{videos_needed}: ✗ {result.error}")
+                except Exception as e:
+                    logger.error(f"  Video {i+1}/{videos_needed}: ✗ {e}")
+                    from app.services.video_generator import GeneratedVideo
+                    results.append(GeneratedVideo(success=False, error=str(e)))
             
             successful = [r for r in results if r.success]
             failed = [r for r in results if not r.success]
@@ -405,6 +413,7 @@ class AutomationScheduler:
                                    "videos_generated": len(successful),
                                    "videos_failed": len(failed),
                                    "cost_usd": round(total_cost, 2),
+                                   "source": "pexels_stock",
                                },
                                duration=duration)
             
@@ -418,6 +427,7 @@ class AutomationScheduler:
             self._log_pipeline(db, "video_gen", "failed", error=str(e))
         finally:
             db.close()
+
     
     # =====================================================================
     # Phase 3: Auto-Posting
@@ -509,22 +519,34 @@ class AutomationScheduler:
             if slot_index == num_slots - 1:
                 slot_videos = all_video_filenames[slot_start:]
             
+            # If not enough videos for all phones in this slot,
+            # still post what we have (don't skip entirely!)
             if not slot_videos:
-                logger.info(f"Slot {slot_index + 1}: No videos left for this time slot")
+                # Try to use ALL available videos if slot math gives empty
+                slot_videos = all_video_filenames[:max(1, len(phone_ids))]
+            
+            if not slot_videos:
+                logger.info(f"Slot {slot_index + 1}: No videos available at all")
                 self._log_pipeline(db, "posting", "skipped",
                                    details={"reason": "no_videos_for_slot", "slot": slot_index + 1})
                 return
             
-            logger.info(f"Slot {slot_index + 1}: Posting {len(slot_videos)} videos to {len(phone_ids)} phones")
+            # If fewer videos than phones, post to as many phones as we have videos
+            active_phone_ids = phone_ids
+            if len(slot_videos) < len(phone_ids):
+                logger.info(f"Slot {slot_index + 1}: Only {len(slot_videos)} videos for {len(phone_ids)} phones — posting partial")
+                active_phone_ids = phone_ids[:len(slot_videos)]
+            
+            logger.info(f"Slot {slot_index + 1}: Posting {len(slot_videos)} videos to {len(active_phone_ids)} phones")
             
             # Post this slot's videos to phones
             post_resp = requests.post(
                 f"{internal_base}/api/videos/post/batch",
                 json={
                     "videos": slot_videos,
-                    "phone_ids": phone_ids,
+                    "phone_ids": active_phone_ids,
                     "caption": "",
-                    "hashtags": "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo",
+                    "hashtags": "#ifb #moots? #mootmeup #fyp #glazer",
                     "auto_start": True,
                     "auto_stop": True,
                     "auto_delete": config["auto_delete"],

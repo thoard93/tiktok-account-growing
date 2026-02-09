@@ -4,6 +4,7 @@ Application Configuration
 Manages environment variables and application settings.
 """
 
+import os
 from functools import lru_cache
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,8 +48,8 @@ class Settings(BaseSettings):
     min_delay_seconds: int = 30
     max_delay_seconds: int = 120
     
-    # Video Storage
-    video_storage_path: str = "./data/videos"
+    # Video Storage — uses Render persistent disk if available
+    video_storage_path: str = "/var/data/videos" if os.path.isdir("/var/data") else "./data/videos"
     
     def get_geelark_credentials(self) -> dict:
         """Return the appropriate credentials based on auth method."""

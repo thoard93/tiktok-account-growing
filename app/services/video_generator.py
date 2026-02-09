@@ -56,32 +56,26 @@ IMAGE_PROMPT_TEMPLATES = [
     "Hyper-realistic POV evening walk through a European cobblestone street, warm café lights and street lamps, locals dining at sidewalk tables in the background, charming old town ambiance, premium cinematic quality"
 ]
 
-# Text overlays for videos
-TEXT_OVERLAYS = [
-    "teamwork trend",
-    "teamwork ifb",
-    "teamwork makes the dream work",
-    "let's go teamwork",
-    "teamwork challenge",
-    "teamwork goals 💪",
-    "teamwork",
-    "teamwork time"
+# Text overlays for videos — Loom-style multi-line format
+# Each entry is repeated 8x in a vertical column covering the screen
+TEXT_OVERLAY_LINES = [
+    "Moot me",
+    "Teamwork trend",
+    "Follow me",
+    "Moot me up",
+    "Teamwork ifb",
 ]
 
-# Captions for TikTok posts
+# Captions for TikTok posts — hashtag-focused like the Loom walkthrough
 CAPTIONS = [
-    "Teamwork makes the dream work 💪 Who's with me?",
-    "Let's go teamwork! Tag your squad 🔥",
-    "Teamwork trend hitting different 🌟",
-    "Real ones know 🤝 #teamwork",
-    "Teamwork energy today ✨",
-    "Together we rise 🚀",
-    "Squad goals fr fr 💯",
-    "Teamwork makes everything better 🙌"
+    "#ifb #moots? #mootmeup #fyp #glazer",
+    "#ifb #moots? #teamwork #fyp #glazer",
+    "#ifb #moots #mootmeup #fyp #teamworktrend",
+    "#ifb #moots? #mootmeup #fyp",
 ]
 
-# Hashtags (max 5, teamwork focused only)
-HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo"
+# Hashtags — proven growth format from Loom walkthrough
+HASHTAGS = "#ifb #moots? #mootmeup #fyp #glazer"
 
 # Cinematic video motion prompts for Seedance 1.5 Pro
 VIDEO_MOTION_PROMPTS = [
@@ -132,14 +126,18 @@ class VideoGenerator:
         else:
             logger.warning("ANTHROPIC_API_KEY not set - will use template prompts")
         
-        # Output directory for generated videos
-        self.output_dir = Path(output_dir or os.getenv("VIDEO_OUTPUT_DIR", "./generated_videos"))
+        # Output directory for generated videos — uses Render persistent disk if available
+        default_dir = "/var/data/generated_videos" if os.path.isdir("/var/data") else "./generated_videos"
+        self.output_dir = Path(output_dir or os.getenv("VIDEO_OUTPUT_DIR", default_dir))
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Sound directories
         self.sounds_dir = Path(__file__).parent.parent.parent / "assets" / "sounds"
         self.trending_sounds_dir = self.sounds_dir / "trending"
         self.trending_sounds_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Track used stock clips to avoid reuse across accounts in same batch
+        self._used_clips: set = set()
         
         logger.info(f"VideoGenerator v3 initialized, output: {self.output_dir}")
     
@@ -216,20 +214,26 @@ class VideoGenerator:
         self,
         input_video_path: str,
         output_video_path: str,
-        text: str,
-        font_size: int = 24,
+        text_line: str,
+        repeat_count: int = 8,
+        font_size: int = 42,
         font_color: str = "white",
         border_color: str = "black",
         border_width: int = 3
     ) -> bool:
         """
-        Add centered text overlay to video using FFmpeg.
+        Add Loom-style multi-line text overlay to video using FFmpeg.
+        
+        Repeats 'text_line' vertically 8 times in a column, covering ~60% of
+        the screen height. Bold white text with black outline, left-of-center.
+        Matches the proven growth strategy from the Loom walkthrough.
         
         Args:
             input_video_path: Source video
             output_video_path: Output with overlay
-            text: Text to overlay
-            font_size: Font size in pixels
+            text_line: Single line to repeat (e.g. "Moot me")
+            repeat_count: How many times to repeat (default 8)
+            font_size: Font size in pixels (default 42 for 720p)
             font_color: Text color
             border_color: Outline color
             border_width: Outline thickness
@@ -238,22 +242,38 @@ class VideoGenerator:
             True if successful
         """
         try:
-            # FFmpeg drawtext filter with border effect
-            # Text centered horizontally and vertically
-            drawtext_filter = (
-                f"drawtext=text='{text}':"
-                f"fontsize={font_size}:"
-                f"fontcolor={font_color}:"
-                f"borderw={border_width}:"
-                f"bordercolor={border_color}:"
-                f"x=(w-text_w)/2:"
-                f"y=(h-text_h)/2"
-            )
+            # Build stacked drawtext filters — one per line
+            # Video is 9:16 (720x1280), so height is 1280px
+            # 8 lines at font_size 42 with 12px spacing = 8 * 54 = 432px total
+            # Center vertically: start_y = (1280 - 432) / 2 ≈ 424
+            line_height = font_size + 12  # font + spacing
+            total_height = repeat_count * line_height
+            start_y = f"(h-{total_height})/2"  # dynamic centering
+            
+            # Escape single quotes in text for FFmpeg
+            safe_text = text_line.replace("'", "'\\\''")
+            
+            filters = []
+            for i in range(repeat_count):
+                y_pos = f"{start_y}+{i * line_height}"
+                drawtext = (
+                    f"drawtext=text='{safe_text}':"
+                    f"fontsize={font_size}:"
+                    f"fontcolor={font_color}:"
+                    f"borderw={border_width}:"
+                    f"bordercolor={border_color}:"
+                    f"x=(w-text_w)/2:"
+                    f"y={y_pos}"
+                )
+                filters.append(drawtext)
+            
+            # Chain all drawtext filters with commas
+            vf_string = ",".join(filters)
             
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_video_path,
-                "-vf", drawtext_filter,
+                "-vf", vf_string,
                 "-codec:a", "copy",
                 output_video_path
             ]
@@ -261,7 +281,7 @@ class VideoGenerator:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             
             if result.returncode == 0:
-                logger.info(f"Text overlay added: {text}")
+                logger.info(f"Multi-line text overlay added: '{text_line}' x{repeat_count}")
                 return True
             else:
                 logger.error(f"FFmpeg error: {result.stderr}")
@@ -534,7 +554,311 @@ class VideoGenerator:
             return False
     
     # ===========================
-    # Main Video Pipeline v3
+    # Stock Footage Pipeline (Pexels)
+    # ===========================
+    
+    # Search queries for stock footage backgrounds
+    STOCK_SEARCH_QUERIES = [
+        "city night timelapse",
+        "city skyline night",
+        "night city lights",
+        "city aerial night",
+        "urban night traffic",
+        "sunset city skyline",
+        "city buildings night",
+        "downtown night lights",
+        "city street night walking",
+        "nature timelapse scenery",
+        "ocean waves sunset",
+        "mountain landscape sunset",
+        "city bridge night lights",
+        "tokyo city night",
+        "new york skyline night",
+    ]
+    
+    def fetch_stock_footage(self, count: int = 5) -> int:
+        """
+        Fetch stock video clips from Pexels API (FREE) and cache locally.
+        
+        Downloads HD vertical/landscape footage of cities, nature, etc.
+        These serve as backgrounds for the text overlay videos.
+        
+        Args:
+            count: Number of clips to fetch
+            
+        Returns:
+            Number of clips successfully downloaded
+        """
+        api_key = os.getenv("PEXELS_API_KEY", "")
+        if not api_key:
+            logger.warning("PEXELS_API_KEY not set — can't fetch stock footage")
+            return 0
+        
+        # Stock footage cache directory
+        stock_dir = self.output_dir / "stock_clips"
+        stock_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Check existing cache
+        existing = list(stock_dir.glob("*.mp4"))
+        if len(existing) >= 20:
+            logger.info(f"Stock footage cache has {len(existing)} clips — sufficient")
+            return len(existing)
+        
+        import httpx
+        downloaded = 0
+        
+        try:
+            query = random.choice(self.STOCK_SEARCH_QUERIES)
+            logger.info(f"Fetching stock footage from Pexels: '{query}'")
+            
+            with httpx.Client(timeout=30) as client:
+                resp = client.get(
+                    "https://api.pexels.com/videos/search",
+                    params={
+                        "query": query,
+                        "per_page": min(count, 10),
+                        "orientation": "portrait",  # 9:16 vertical
+                        "size": "medium",
+                    },
+                    headers={"Authorization": api_key}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            
+            videos = data.get("videos", [])
+            if not videos:
+                logger.warning(f"No Pexels results for '{query}'")
+                return 0
+            
+            for video in videos[:count]:
+                video_id = video.get("id", "unknown")
+                
+                # Find the best quality file (HD, portrait preferred)
+                video_files = video.get("video_files", [])
+                best_file = None
+                for vf in video_files:
+                    w = vf.get("width", 0)
+                    h = vf.get("height", 0)
+                    # Prefer portrait (h > w) and reasonable quality
+                    if h >= 720 and vf.get("link"):
+                        if best_file is None or (h > w and h <= 1920):
+                            best_file = vf
+                
+                if not best_file:
+                    # Fallback: just take the first file with a link
+                    best_file = next((vf for vf in video_files if vf.get("link")), None)
+                
+                if not best_file:
+                    continue
+                
+                filename = f"stock_{video_id}.mp4"
+                filepath = stock_dir / filename
+                
+                if filepath.exists():
+                    continue  # Skip duplicates
+                
+                try:
+                    with httpx.Client(timeout=60) as client:
+                        dl_resp = client.get(best_file["link"])
+                        dl_resp.raise_for_status()
+                        filepath.write_bytes(dl_resp.content)
+                    
+                    downloaded += 1
+                    logger.info(f"  Downloaded: {filename} ({len(dl_resp.content) / 1024 / 1024:.1f}MB)")
+                except Exception as e:
+                    logger.warning(f"  Failed to download {video_id}: {e}")
+            
+            logger.info(f"Stock footage fetch complete: {downloaded} new clips")
+            
+        except Exception as e:
+            logger.error(f"Pexels API fetch failed: {e}")
+        
+        return downloaded
+    
+    def clip_stock_footage(self, source_path: str, output_path: str, duration: int = 8) -> bool:
+        """
+        Clip a stock video to a short segment (7-10 seconds) for TikTok.
+        Picks a random start point and crops to 9:16 if needed.
+        
+        Args:
+            source_path: Path to full stock video
+            output_path: Path for clipped output
+            duration: Target clip length in seconds
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Get video duration first
+            probe_cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                source_path
+            ]
+            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
+            total_duration = float(probe_result.stdout.strip() or "0")
+            
+            if total_duration < duration + 1:
+                # Video too short, use the whole thing
+                start_time = 0
+            else:
+                # Random start point, leaving room for the clip
+                max_start = total_duration - duration - 1
+                start_time = random.uniform(0, max(0, max_start))
+            
+            # Clip + ensure 9:16 + normalize to 720x1280
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_time),
+                "-i", source_path,
+                "-t", str(duration),
+                "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
+                "-an",  # Strip audio (we add our own sound)
+                "-c:v", "libx264",
+                "-preset", "fast",
+                output_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0:
+                logger.info(f"Stock clip created: {duration}s from {start_time:.1f}s")
+                return True
+            else:
+                logger.error(f"Clip failed: {result.stderr[:200]}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Stock clipping failed: {e}")
+            return False
+    
+    def generate_stock_video(
+        self,
+        text_overlay: Optional[str] = None,
+    ) -> 'GeneratedVideo':
+        """
+        Generate a video using FREE stock footage instead of AI generation.
+        
+        Pipeline:
+        1. Pick random stock clip from Pexels cache (auto-fetch if empty)
+        2. Clip to 7-10 seconds, crop to 9:16
+        3. Add Loom-style multi-line text overlay ("Moot me" x8)
+        4. Add trending sound
+        5. Strip metadata
+        
+        Cost: $0.00 (vs ~$0.20 for AI pipeline)
+        """
+        start_time = time.time()
+        
+        # Ensure we have stock footage
+        stock_dir = self.output_dir / "stock_clips"
+        stock_dir.mkdir(parents=True, exist_ok=True)
+        stock_clips = list(stock_dir.glob("*.mp4"))
+        
+        if len(stock_clips) < 3:
+            logger.info("Low stock footage cache — fetching from Pexels...")
+            self.fetch_stock_footage(count=10)
+            stock_clips = list(stock_dir.glob("*.mp4"))
+        
+        if not stock_clips:
+            logger.error("No stock footage available — falling back to AI pipeline")
+            return self.generate_teamwork_video(text_overlay=text_overlay)
+        
+        # 1. Pick a stock clip NOT already used in this batch
+        unused_clips = [c for c in stock_clips if c.name not in self._used_clips]
+        if not unused_clips:
+            # All clips used — reset tracker and fetch more variety
+            logger.info("All stock clips used in this batch — resetting tracker")
+            self._used_clips.clear()
+            self.fetch_stock_footage(count=5)  # Get fresh clips
+            stock_clips = list(stock_dir.glob("*.mp4"))
+            unused_clips = stock_clips
+        
+        source_clip = random.choice(unused_clips)
+        self._used_clips.add(source_clip.name)  # Mark as used
+        logger.info(f"Using stock clip: {source_clip.name} (used {len(self._used_clips)}/{len(stock_clips)} unique clips)")
+        
+        # 2. Clip to 7-10 seconds
+        clip_duration = random.randint(7, 10)
+        video_filename = f"teamwork_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
+        raw_clip_path = self.output_dir / f"raw_{video_filename}"
+        final_video_path = self.output_dir / video_filename
+        
+        clip_success = self.clip_stock_footage(
+            str(source_clip),
+            str(raw_clip_path),
+            duration=clip_duration
+        )
+        
+        if not clip_success:
+            logger.error("Stock clip failed — falling back to AI pipeline")
+            return self.generate_teamwork_video(text_overlay=text_overlay)
+        
+        # 3. Add Loom-style multi-line text overlay
+        final_text_line = text_overlay or random.choice(TEXT_OVERLAY_LINES)
+        overlay_path = self.output_dir / f"overlay_{video_filename}"
+        
+        overlay_success = self.add_text_overlay(
+            str(raw_clip_path),
+            str(overlay_path),
+            final_text_line,
+            repeat_count=8,
+            font_size=42
+        )
+        
+        if overlay_success:
+            raw_clip_path.unlink(missing_ok=True)
+        else:
+            overlay_path = raw_clip_path
+            logger.warning("Using clip without text overlay")
+        
+        # 4. Add trending sound
+        sound_path = self.output_dir / f"sound_{video_filename}"
+        sound_success = self.add_sound_to_video(
+            str(overlay_path),
+            str(sound_path)
+        )
+        
+        if sound_success and sound_path.exists():
+            if overlay_path != raw_clip_path:
+                overlay_path.unlink(missing_ok=True)
+        else:
+            sound_path = overlay_path
+            logger.warning("Using video without sound")
+        
+        # 5. Strip metadata
+        strip_success = self.strip_metadata(
+            str(sound_path),
+            str(final_video_path)
+        )
+        
+        if strip_success:
+            if sound_path != overlay_path and sound_path != raw_clip_path:
+                sound_path.unlink(missing_ok=True)
+        else:
+            if sound_path.exists():
+                sound_path.rename(final_video_path)
+        
+        duration = time.time() - start_time
+        
+        if final_video_path.exists():
+            logger.info(f"Stock video generated in {duration:.1f}s: {final_video_path.name}")
+            return GeneratedVideo(
+                success=True,
+                video_path=str(final_video_path),
+                text_overlay=final_text_line,
+                cost_usd=0.00  # FREE!
+            )
+        else:
+            return GeneratedVideo(
+                success=False,
+                error="Stock video pipeline failed",
+                cost_usd=0.00
+            )
+    
+    # ===========================
+    # Main Video Pipeline v3 (AI - costs ~$0.20/video)
     # ===========================
     
     def generate_teamwork_video(
@@ -662,8 +986,8 @@ class VideoGenerator:
                 cost_usd=cost
             )
         
-        # 5. Add text overlay
-        final_text = text_overlay or random.choice(TEXT_OVERLAYS)
+        # 5. Add Loom-style multi-line text overlay
+        final_text_line = text_overlay or random.choice(TEXT_OVERLAY_LINES)
         overlay_video_path = self.output_dir / f"overlay_{video_filename}"
         
         if skip_overlay:
@@ -672,8 +996,9 @@ class VideoGenerator:
             overlay_success = self.add_text_overlay(
                 str(raw_video_path),
                 str(overlay_video_path),
-                final_text,
-                font_size=18  # Smaller, subtle text overlay
+                final_text_line,  # Repeated 8x vertically
+                repeat_count=8,
+                font_size=42   # Large bold text covering ~60% of screen
             )
             
             if overlay_success:
