@@ -556,27 +556,30 @@ class VideoGenerator:
             return False
     
     # ===========================
-    # Video Source Pipeline (YouTube via Proxy → Pexels Fallback)
+    # Video Source Pipeline (YouTube via Residential Proxy)
     # Each clip gets visual uniqueness transforms
     # ===========================
     
-    # YouTube search queries for long compilation videos (3-30 min)
+    # YouTube search queries — ONLY footage/timelapse compilations (NO tutorials)
     YOUTUBE_SEARCH_QUERIES = [
-        "4K city timelapse compilation",
-        "city night timelapse 4K",
-        "nature scenery montage 4K",
-        "sunset timelapse collection",
-        "drone city footage compilation",
-        "cinematic nature b-roll 4K",
-        "city skyline timelapse night",
-        "ocean waves cinematic 4K",
-        "mountain landscape timelapse",
-        "aerial city drone footage",
-        "tokyo night timelapse 4K",
-        "new york city timelapse",
-        "london city timelapse",
-        "nature documentary b-roll",
-        "city traffic timelapse night",
+        "4K city timelapse compilation no talking",
+        "city night timelapse 4K compilation",
+        "nature scenery 4K no commentary",
+        "sunset timelapse 4K collection",
+        "drone city footage 4K no music",
+        "cinematic b-roll 4K compilation",
+        "city skyline timelapse night 4K",
+        "ocean waves 4K relaxing footage",
+        "mountain landscape 4K timelapse",
+        "aerial city drone 4K footage",
+        "tokyo night walk 4K footage",
+        "new york city 4K timelapse",
+        "london timelapse 4K night",
+        "nature 4K scenery relaxing",
+        "city traffic night 4K timelapse",
+        "rain city ambience 4K footage",
+        "neon city lights 4K walking",
+        "countryside 4K drone footage",
     ]
     
     # Pexels fallback queries (if YouTube fails)
@@ -1044,11 +1047,10 @@ class VideoGenerator:
         text_overlay: Optional[str] = None,
     ) -> 'GeneratedVideo':
         """
-        Generate a unique video using YouTube scene clips (primary) or Pexels (fallback).
+        Generate a unique video using YouTube scene clips (via residential proxy).
         
         Pipeline:
-        1. Try YouTube scene clips first (via residential proxy)
-           → Falls back to Pexels stock footage if YouTube unavailable
+        1. Fetch YouTube scene clips via residential proxy
         2. Apply visual uniqueness transforms (hue, speed, flip, brightness, crop offset)
         3. Add Loom-style multi-line text overlay
         4. Add trending sound
@@ -1058,11 +1060,10 @@ class VideoGenerator:
         """
         start_time = time.time()
         
-        # === SOURCE PRIORITY: YouTube scene clips → Pexels stock ===
+        # === SOURCE: YouTube scene clips only (no Pexels) ===
         source_clip = None
         source_type = None
         
-        # Try 1: YouTube scene clips (most unique)
         scene_dir = self.output_dir / "scene_clips"
         scene_dir.mkdir(parents=True, exist_ok=True)
         scene_clips = list(scene_dir.glob("*.mp4"))
@@ -1082,36 +1083,11 @@ class VideoGenerator:
             self._used_clips.add(source_clip.name)
             logger.info(f"Using YouTube scene clip: {source_clip.name}")
         
-        # Try 2: Pexels stock footage (fallback)
         if source_clip is None:
-            logger.info("No YouTube clips — falling back to Pexels...")
-            stock_dir = self.output_dir / "stock_clips"
-            stock_dir.mkdir(parents=True, exist_ok=True)
-            stock_clips = list(stock_dir.glob("*.mp4"))
-            
-            if len(stock_clips) < 3:
-                self.fetch_pexels_footage(count=15)
-                stock_clips = list(stock_dir.glob("*.mp4"))
-            
-            if stock_clips:
-                unused = [c for c in stock_clips if c.name not in self._used_clips]
-                if not unused:
-                    self._used_clips.clear()
-                    self.fetch_pexels_footage(count=10)
-                    stock_clips = list(stock_dir.glob("*.mp4"))
-                    unused = stock_clips
-                
-                if unused:
-                    source_clip = random.choice(unused)
-                    source_type = "pexels"
-                    self._used_clips.add(source_clip.name)
-                    logger.info(f"Using Pexels clip: {source_clip.name}")
-        
-        if source_clip is None:
-            logger.error("No video clips available from either YouTube or Pexels")
+            logger.error("No YouTube scene clips available. Check YOUTUBE_PROXY env var and proxy credentials.")
             return GeneratedVideo(
                 success=False,
-                error="No clips available. Check YOUTUBE_PROXY and PEXELS_API_KEY env vars.",
+                error="No YouTube clips available. Check YOUTUBE_PROXY env var.",
                 cost_usd=0.00
             )
         
