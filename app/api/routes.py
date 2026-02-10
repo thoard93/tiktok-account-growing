@@ -1796,7 +1796,7 @@ async def get_schedule_config(db: Session = Depends(get_db)):
         return {
             "enabled": False,
             "phone_ids": [],
-            "posts_per_phone": 3,
+            "posts_per_phone": 6,
             "enable_warmup": True,
             "auto_delete": True,
             "warmup_hour_est": 8,

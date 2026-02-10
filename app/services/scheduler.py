@@ -79,7 +79,7 @@ class AutomationScheduler:
                 }
             return {
                 "enabled": False,
-                "posts_per_phone": 3,
+                "posts_per_phone": 6,
                 "enable_warmup": True,
                 "auto_delete": True,
                 "warmup_hour_est": 8,
@@ -387,12 +387,12 @@ class AutomationScheduler:
     
     def run_daily_video_generation(self):
         """
-        Generate teamwork videos using FREE stock footage (Pexels).
-        Falls back to AI generation if stock footage unavailable.
-        Videos per account = posts_per_phone from config.
+        Generate videos using YouTube scene clips (via residential proxy).
+        Generates as many as possible from available scene clips to build buffer.
+        Minimum target = accounts × posts_per_phone (6 per account).
         """
         logger.info("=" * 50)
-        logger.info("PIPELINE PHASE 2: Video Generation (Stock Footage)")
+        logger.info("PIPELINE PHASE 2: Video Generation (YouTube Clips)")
         logger.info("=" * 50)
         
         config = self._get_config()
@@ -410,11 +410,11 @@ class AutomationScheduler:
                 return
             
             posts_per = config["posts_per_phone"]
-            videos_needed = len(accounts) * posts_per
+            min_needed = len(accounts) * posts_per
             
-            logger.info(f"Generating {videos_needed} videos ({len(accounts)} accounts × {posts_per} each)")
+            logger.info(f"Minimum videos needed: {min_needed} ({len(accounts)} accounts × {posts_per} each)")
             self._log_pipeline(db, "video_gen", "started",
-                               details={"videos_needed": videos_needed,
+                               details={"min_needed": min_needed,
                                         "account_count": len(accounts)})
             
             start_time = time.time()
@@ -422,20 +422,34 @@ class AutomationScheduler:
             from app.services.video_generator import get_video_generator
             generator = get_video_generator()
             
-            # Use stock footage pipeline (FREE) as primary
+            # Generate as many videos as we have clips for (builds buffer)
+            # Stop when we run out of scene clips or hit reasonable limit
+            max_videos = max(min_needed, 30)  # Generate up to 30 or min needed
             results = []
-            for i in range(videos_needed):
+            consecutive_fails = 0
+            
+            for i in range(max_videos):
                 try:
                     result = generator.generate_stock_video()
                     results.append(result)
                     if result.success:
-                        logger.info(f"  Video {i+1}/{videos_needed}: ✓ {result.video_path}")
+                        logger.info(f"  Video {i+1}: ✓ {result.video_path}")
+                        consecutive_fails = 0
                     else:
-                        logger.warning(f"  Video {i+1}/{videos_needed}: ✗ {result.error}")
+                        logger.warning(f"  Video {i+1}: ✗ {result.error}")
+                        consecutive_fails += 1
+                        # Stop generating if we've hit 3 consecutive failures
+                        # (means we're out of scene clips)
+                        if consecutive_fails >= 3:
+                            logger.info(f"  Stopping: {consecutive_fails} consecutive failures (out of clips)")
+                            break
                 except Exception as e:
-                    logger.error(f"  Video {i+1}/{videos_needed}: ✗ {e}")
+                    logger.error(f"  Video {i+1}: ✗ {e}")
                     from app.services.video_generator import GeneratedVideo
                     results.append(GeneratedVideo(success=False, error=str(e)))
+                    consecutive_fails += 1
+                    if consecutive_fails >= 3:
+                        break
             
             successful = [r for r in results if r.success]
             failed = [r for r in results if not r.success]
@@ -447,7 +461,7 @@ class AutomationScheduler:
                                    "videos_generated": len(successful),
                                    "videos_failed": len(failed),
                                    "cost_usd": round(total_cost, 2),
-                                   "source": "pexels_stock",
+                                   "source": "youtube_scene_clips",
                                },
                                duration=duration)
             

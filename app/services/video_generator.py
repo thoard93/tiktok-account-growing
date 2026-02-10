@@ -807,7 +807,7 @@ class VideoGenerator:
         return extracted
     
     def _replenish_scene_clips(self):
-        """Auto-fetch YouTube source videos and extract scene clips."""
+        """Auto-fetch YouTube source videos and extract ALL possible scene clips."""
         try:
             logger.info("Replenishing scene clips from YouTube...")
             downloaded = self.fetch_youtube_source_videos(max_videos=2)
@@ -828,7 +828,8 @@ class VideoGenerator:
                 
                 logger.info(f"Processing: {source_name}...")
                 scenes = self.detect_scenes(str(source_video), threshold=0.3)
-                extracted = self.extract_scene_clips(str(source_video), scenes, max_clips=50)
+                # Extract ALL detected scenes — maximize clip library
+                extracted = self.extract_scene_clips(str(source_video), scenes, max_clips=999)
                 logger.info(f"  Extracted {extracted} clips from {source_name}")
                 
         except Exception as e:
@@ -1061,6 +1062,7 @@ class VideoGenerator:
         start_time = time.time()
         
         # === SOURCE: YouTube scene clips only (no Pexels) ===
+        # Clips are DELETED after use to guarantee no reuse
         source_clip = None
         source_type = None
         
@@ -1074,14 +1076,9 @@ class VideoGenerator:
             scene_clips = list(scene_dir.glob("*.mp4"))
         
         if scene_clips:
-            unused = [c for c in scene_clips if c.name not in self._used_clips]
-            if not unused:
-                self._used_clips.clear()
-                unused = scene_clips
-            source_clip = random.choice(unused)
+            source_clip = random.choice(scene_clips)
             source_type = "youtube_scene"
-            self._used_clips.add(source_clip.name)
-            logger.info(f"Using YouTube scene clip: {source_clip.name}")
+            logger.info(f"Using YouTube scene clip: {source_clip.name} ({len(scene_clips)} remaining)")
         
         if source_clip is None:
             logger.error("No YouTube scene clips available. Check YOUTUBE_PROXY env var and proxy credentials.")
@@ -1117,6 +1114,13 @@ class VideoGenerator:
                 error="Clip processing failed",
                 cost_usd=0.00
             )
+        
+        # Delete the source scene clip after use — never reuse
+        try:
+            source_clip.unlink()
+            logger.info(f"Deleted used scene clip: {source_clip.name}")
+        except Exception as e:
+            logger.warning(f"Could not delete used clip {source_clip.name}: {e}")
         
         # 3. Add text overlay
         final_text_line = text_overlay or random.choice(TEXT_OVERLAY_LINES)
