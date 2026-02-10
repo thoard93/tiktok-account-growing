@@ -718,18 +718,27 @@ elif page == "🎬 Videos":
         if videos and videos.get("videos"):
             st.markdown(f"**{len(videos['videos'])} videos available**")
             for v in videos["videos"]:
-                col1, col2, col3, col4 = st.columns([4, 2, 2, 1])
+                fname = v.get('filename', 'Unknown')
+                col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 1, 1])
                 with col1:
-                    st.markdown(f"🎬 **{v.get('filename', 'Unknown')}**")
+                    st.markdown(f"🎬 **{fname}**")
                 with col2:
                     size = v.get('size_mb', 0)
                     st.caption(f"{size:.1f} MB" if size else "—")
                 with col3:
-                    st.caption(v.get('created', '—')[:16])
+                    st.caption(v.get('created', v.get('created_at', '—'))[:16])
                 with col4:
-                    if st.button("🗑️", key=f"del_{v.get('filename', '')}"):
-                        api_delete(f"/videos/{v.get('filename', '')}")
+                    if st.button("▶️", key=f"preview_{fname}", help="Preview video"):
+                        st.session_state[f"show_preview_{fname}"] = not st.session_state.get(f"show_preview_{fname}", False)
+                with col5:
+                    if st.button("🗑️", key=f"del_{fname}"):
+                        api_delete(f"/videos/{fname}")
                         st.rerun()
+                
+                # Show video preview if toggled
+                if st.session_state.get(f"show_preview_{fname}", False):
+                    preview_url = f"{API_BASE_URL}/videos/download/{fname}"
+                    st.video(preview_url)
         else:
             st.info("No videos in library. Generate some using the AI Generate tab!")
     
