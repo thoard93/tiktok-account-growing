@@ -908,8 +908,12 @@ class VideoGenerator:
             scene_clips = list(scene_dir.glob("*.mp4"))
         
         if not scene_clips:
-            logger.error("No scene clips available — falling back to AI pipeline")
-            return self.generate_teamwork_video(text_overlay=text_overlay)
+            logger.error("No scene clips available — YouTube fetch/extract may have failed. Check logs.")
+            return GeneratedVideo(
+                success=False,
+                error="No scene clips available. YouTube download or scene extraction failed.",
+                cost_usd=0.00
+            )
         
         # 1. Pick a scene clip NOT already used in this batch
         unused_clips = [c for c in scene_clips if c.name not in self._used_clips]
@@ -1001,37 +1005,47 @@ class VideoGenerator:
         Auto-fetch YouTube source videos and extract scene clips.
         Called when scene_clips cache is running low.
         """
-        # Step 1: Fetch YouTube source videos
-        self.fetch_youtube_source_videos(max_videos=2)
-        
-        # Step 2: Detect scenes & extract clips from all un-processed sources
-        source_dir = self.output_dir / "youtube_sources"
-        scene_dir = self.output_dir / "scene_clips"
-        
-        if not source_dir.exists():
-            return
-        
-        for source_video in source_dir.glob("*.mp4"):
-            source_name = source_video.stem
+        try:
+            # Step 1: Fetch YouTube source videos
+            logger.info("_replenish_scene_clips: Step 1 — Fetching YouTube source videos...")
+            downloaded = self.fetch_youtube_source_videos(max_videos=2)
+            logger.info(f"_replenish_scene_clips: YouTube fetch returned {downloaded}")
             
-            # Check if we already extracted clips from this source
-            existing_clips = list(scene_dir.glob(f"{source_name}_scene*.mp4"))
-            if len(existing_clips) >= 5:
-                continue  # Already processed
+            # Step 2: Detect scenes & extract clips from all un-processed sources
+            source_dir = self.output_dir / "youtube_sources"
+            scene_dir = self.output_dir / "scene_clips"
             
-            logger.info(f"Processing YouTube source: {source_name}...")
+            if not source_dir.exists():
+                logger.warning(f"_replenish_scene_clips: source_dir does not exist: {source_dir}")
+                return
             
-            # Detect scenes
-            scenes = self.detect_scenes(str(source_video), threshold=0.3)
-            logger.info(f"  Found {len(scenes)} scenes")
+            source_videos = list(source_dir.glob("*.mp4"))
+            logger.info(f"_replenish_scene_clips: Found {len(source_videos)} source videos in {source_dir}")
             
-            # Extract clips from each scene (already cropped to 9:16)
-            extracted = self.extract_scene_clips(
-                str(source_video),
-                scenes,
-                max_clips=50
-            )
-            logger.info(f"  Extracted {extracted} unique clips from {source_name}")
+            for source_video in source_videos:
+                source_name = source_video.stem
+                
+                # Check if we already extracted clips from this source
+                existing_clips = list(scene_dir.glob(f"{source_name}_scene*.mp4"))
+                if len(existing_clips) >= 5:
+                    logger.info(f"_replenish_scene_clips: {source_name} already has {len(existing_clips)} clips, skipping")
+                    continue
+                
+                logger.info(f"Processing YouTube source: {source_name}...")
+                
+                # Detect scenes
+                scenes = self.detect_scenes(str(source_video), threshold=0.3)
+                logger.info(f"  Found {len(scenes)} scenes")
+                
+                # Extract clips from each scene (already cropped to 9:16)
+                extracted = self.extract_scene_clips(
+                    str(source_video),
+                    scenes,
+                    max_clips=50
+                )
+                logger.info(f"  Extracted {extracted} unique clips from {source_name}")
+        except Exception as e:
+            logger.error(f"_replenish_scene_clips FAILED: {type(e).__name__}: {e}")
     
     # ===========================
     # Main Video Pipeline v3 (AI - costs ~$0.20/video)
