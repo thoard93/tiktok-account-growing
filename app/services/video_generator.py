@@ -554,214 +554,137 @@ class VideoGenerator:
             return False
     
     # ===========================
-    # YouTube Scene-Clipping Pipeline (FREE, unique clips)
+    # Stock Footage Pipeline (Pexels + Visual Uniqueness Transforms)
     # ===========================
     
-    # Search queries for finding long compilation videos on YouTube
-    # yt-dlp uses "ytsearch3:" prefix to find 3 results per query
-    YOUTUBE_SEARCH_QUERIES = [
-        "4K city timelapse compilation",
-        "city night timelapse 4K",
-        "nature scenery montage 4K",
-        "sunset timelapse collection",
-        "drone city footage compilation",
-        "cinematic nature b-roll 4K",
-        "city skyline timelapse night",
-        "ocean waves cinematic 4K",
-        "mountain landscape timelapse",
-        "aerial city drone footage",
-        "tokyo night timelapse 4K",
-        "new york city timelapse",
-        "london city timelapse",
-        "nature documentary b-roll",
-        "city traffic timelapse night",
+    # Search queries for stock footage backgrounds
+    STOCK_SEARCH_QUERIES = [
+        "city night timelapse",
+        "city skyline night",
+        "night city lights",
+        "city aerial night",
+        "urban night traffic",
+        "sunset city skyline",
+        "city buildings night",
+        "downtown night lights",
+        "city street night walking",
+        "nature timelapse scenery",
+        "ocean waves sunset",
+        "mountain landscape sunset",
+        "city bridge night lights",
+        "tokyo city night",
+        "new york skyline night",
+        "rain city night",
+        "neon lights city",
+        "car driving night city",
+        "clouds timelapse sky",
+        "waterfall nature scenery",
     ]
     
-    def fetch_youtube_source_videos(self, max_videos: int = 2) -> int:
+    def fetch_stock_footage(self, count: int = 5) -> int:
         """
-        Auto-search YouTube for long time-lapse/scenery compilations and download them.
-        Uses yt-dlp's ytsearch to find videos automatically — no manual URL curation needed.
-        
-        Downloads to {output_dir}/youtube_sources/ for later scene extraction.
-        
-        Args:
-            max_videos: Max number of source videos to download per run
-            
-        Returns:
-            Number of videos successfully downloaded
+        Fetch stock video clips from Pexels API (FREE) and cache locally.
+        Downloads HD footage of cities, nature, etc. for background clips.
         """
-        import yt_dlp
+        api_key = os.getenv("PEXELS_API_KEY", "")
+        if not api_key:
+            logger.warning("PEXELS_API_KEY not set — can't fetch stock footage")
+            return 0
         
-        source_dir = self.output_dir / "youtube_sources"
-        source_dir.mkdir(parents=True, exist_ok=True)
+        stock_dir = self.output_dir / "stock_clips"
+        stock_dir.mkdir(parents=True, exist_ok=True)
         
-        # Check existing sources
-        existing = list(source_dir.glob("*.mp4"))
-        if len(existing) >= 5:
-            logger.info(f"YouTube source cache has {len(existing)} videos — sufficient")
+        existing = list(stock_dir.glob("*.mp4"))
+        if len(existing) >= 20:
+            logger.info(f"Stock footage cache has {len(existing)} clips — sufficient")
             return len(existing)
         
+        import httpx
         downloaded = 0
-        query = random.choice(self.YOUTUBE_SEARCH_QUERIES)
-        search_term = f"ytsearch3:{query}"  # Search for 3 results
-        
-        logger.info(f"Searching YouTube for: '{query}'")
-        
-        ydl_opts = {
-            "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
-            "merge_output_format": "mp4",
-            "outtmpl": str(source_dir / "yt_%(id)s.%(ext)s"),
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            # Only download videos 3-30 minutes long (compilations)
-            "match_filter": yt_dlp.utils.match_filter_func("duration >= 180 & duration <= 1800"),
-        }
         
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # First extract info to get video IDs
-                info = ydl.extract_info(search_term, download=False)
+            query = random.choice(self.STOCK_SEARCH_QUERIES)
+            logger.info(f"Fetching stock footage from Pexels: '{query}'")
+            
+            with httpx.Client(timeout=30) as client:
+                resp = client.get(
+                    "https://api.pexels.com/videos/search",
+                    params={
+                        "query": query,
+                        "per_page": min(count, 15),
+                        "orientation": "portrait",
+                        "size": "medium",
+                    },
+                    headers={"Authorization": api_key}
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            
+            videos = data.get("videos", [])
+            if not videos:
+                logger.warning(f"No Pexels results for '{query}'")
+                return 0
+            
+            for video in videos[:count]:
+                video_id = video.get("id", "unknown")
+                video_files = video.get("video_files", [])
                 
-                if not info or "entries" not in info:
-                    logger.warning(f"No YouTube results for '{query}'")
-                    return 0
+                # Pick best file: prefer portrait, 720p-1080p
+                best_file = None
+                for vf in video_files:
+                    w = vf.get("width", 0)
+                    h = vf.get("height", 0)
+                    if h >= 720 and vf.get("link"):
+                        if best_file is None or (h > w and h <= 1920):
+                            best_file = vf
                 
-                entries = list(info["entries"])
+                if not best_file:
+                    best_file = next((vf for vf in video_files if vf.get("link")), None)
                 
-                for entry in entries[:max_videos]:
-                    if entry is None:
-                        continue
-                    
-                    video_id = entry.get("id", "unknown")
-                    title = entry.get("title", "Unknown")
-                    duration = entry.get("duration", 0)
-                    
-                    # Skip if already downloaded
-                    target_path = source_dir / f"yt_{video_id}.mp4"
-                    if target_path.exists():
-                        logger.info(f"  Already cached: {title} ({duration}s)")
-                        continue
-                    
-                    logger.info(f"  Downloading: {title} ({duration}s)...")
-                    
-                    try:
-                        ydl.download([entry["webpage_url"]])
-                        
-                        if target_path.exists():
-                            size_mb = target_path.stat().st_size / 1024 / 1024
-                            logger.info(f"  ✓ Downloaded: {title} ({size_mb:.1f}MB)")
-                            downloaded += 1
-                        else:
-                            # yt-dlp may have saved with a slightly different name
-                            # Check for any new file with this video ID
-                            matches = list(source_dir.glob(f"yt_{video_id}.*"))
-                            if matches:
-                                # Rename to .mp4 if needed
-                                if matches[0].suffix != ".mp4":
-                                    matches[0].rename(target_path)
-                                downloaded += 1
-                                logger.info(f"  ✓ Downloaded: {title}")
-                            else:
-                                logger.warning(f"  ⚠ Download completed but file not found for {video_id}")
-                    except Exception as e:
-                        logger.warning(f"  ✗ Failed to download {title}: {e}")
-                        continue
+                if not best_file:
+                    continue
                 
+                filename = f"stock_{video_id}.mp4"
+                filepath = stock_dir / filename
+                
+                if filepath.exists():
+                    continue
+                
+                try:
+                    with httpx.Client(timeout=60) as client:
+                        dl_resp = client.get(best_file["link"])
+                        dl_resp.raise_for_status()
+                        filepath.write_bytes(dl_resp.content)
+                    
+                    downloaded += 1
+                    size_mb = filepath.stat().st_size / 1024 / 1024
+                    logger.info(f"  Downloaded: {filename} ({size_mb:.1f}MB)")
+                except Exception as e:
+                    logger.warning(f"  Failed to download {video_id}: {e}")
+            
+            logger.info(f"Stock footage fetch complete: {downloaded} new clips")
+            
         except Exception as e:
-            logger.error(f"YouTube search failed: {e}")
+            logger.error(f"Pexels API fetch failed: {e}")
         
-        logger.info(f"YouTube fetch complete: {downloaded} new source videos")
         return downloaded
     
-    def detect_scenes(self, video_path: str, threshold: float = 0.3) -> List[float]:
+    def clip_with_transforms(self, source_path: str, output_path: str, duration: int = 8) -> bool:
         """
-        Detect scene changes in a video using FFmpeg's scene detection filter.
+        Clip a stock video and apply random visual transforms to make it unique.
+        Even if someone else uses the same Pexels source, our clip will look different.
         
-        Uses select='gt(scene,threshold)' to find timestamps where major visual
-        changes occur (cuts between different scenes in a compilation).
-        
-        Args:
-            video_path: Path to the source video
-            threshold: Scene change sensitivity (0.0-1.0, lower = more sensitive)
-                       0.3 = moderate (catches clear cuts, ignores minor changes)
-                       
-        Returns:
-            List of timestamps (in seconds) where new scenes begin
+        Transforms applied (all randomized per clip):
+        - Random start point within the source video
+        - Random crop offset (not always center-crop)
+        - 50% chance of horizontal flip (mirror)
+        - Random hue rotation (color shift)
+        - Random brightness/saturation adjustment
+        - Random speed variation (0.85x to 1.15x)
+        - Force output to 9:16 (720x1280)
         """
         try:
-            # FFmpeg scene detection: outputs timestamps where scene score > threshold
-            cmd = [
-                "ffmpeg", "-i", video_path,
-                "-vf", f"select='gt(scene,{threshold})',showinfo",
-                "-vsync", "vfr",
-                "-f", "null", "-"
-            ]
-            
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300
-            )
-            
-            # Parse showinfo output for timestamps
-            # Format: [Parsed_showinfo_0 ...] n:123 pts:12345 pts_time:45.678 ...
-            timestamps = []
-            for line in result.stderr.split("\n"):
-                if "pts_time:" in line:
-                    try:
-                        pts_part = line.split("pts_time:")[1]
-                        ts = float(pts_part.split()[0])
-                        timestamps.append(ts)
-                    except (ValueError, IndexError):
-                        continue
-            
-            # Always include 0.0 as the first scene
-            if not timestamps or timestamps[0] > 1.0:
-                timestamps.insert(0, 0.0)
-            
-            # Filter out scenes too close together (< 5 seconds apart)
-            filtered = [timestamps[0]]
-            for ts in timestamps[1:]:
-                if ts - filtered[-1] >= 5.0:
-                    filtered.append(ts)
-            
-            logger.info(f"Detected {len(filtered)} scenes in {video_path}")
-            return filtered
-            
-        except subprocess.TimeoutExpired:
-            logger.error(f"Scene detection timed out for {video_path}")
-            return [0.0]
-        except Exception as e:
-            logger.error(f"Scene detection failed: {e}")
-            return [0.0]
-    
-    def extract_scene_clips(
-        self,
-        source_path: str,
-        scenes: List[float],
-        clip_duration: int = 8,
-        max_clips: int = 50
-    ) -> int:
-        """
-        Extract unique clips from each detected scene in a YouTube source video.
-        Each clip is cropped to 9:16 (720x1280) for TikTok.
-        
-        Args:
-            source_path: Path to the YouTube source video
-            scenes: List of scene-change timestamps from detect_scenes()
-            clip_duration: Length of each clip (7-10 seconds)
-            max_clips: Max clips to extract per source video
-            
-        Returns:
-            Number of clips successfully extracted
-        """
-        scene_dir = self.output_dir / "scene_clips"
-        scene_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Get video ID from filename (yt_VIDEOID.mp4)
-        source_name = Path(source_path).stem  # e.g., "yt_dQw4w9WgXcQ"
-        
-        # Get total video duration
-        try:
+            # Get source video duration
             probe_cmd = [
                 "ffprobe", "-v", "error",
                 "-show_entries", "format=duration",
@@ -770,72 +693,80 @@ class VideoGenerator:
             ]
             probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
             total_duration = float(probe_result.stdout.strip() or "0")
-        except Exception:
-            total_duration = 0
-        
-        extracted = 0
-        
-        for i, scene_ts in enumerate(scenes[:max_clips]):
-            # Randomize clip duration slightly (7-10 seconds)
-            this_clip_duration = random.randint(7, 10)
             
-            # Make sure we have enough video left for this clip
-            if total_duration > 0 and scene_ts + this_clip_duration > total_duration:
-                continue
+            # Account for speed change
+            speed_factor = random.uniform(0.85, 1.15)
+            adjusted_duration = duration / speed_factor
             
-            clip_filename = f"{source_name}_scene{i:03d}.mp4"
-            clip_path = scene_dir / clip_filename
+            if total_duration < adjusted_duration + 1:
+                start_time = 0
+            else:
+                max_start = total_duration - adjusted_duration - 1
+                start_time = random.uniform(0, max(0, max_start))
             
-            if clip_path.exists():
-                extracted += 1  # Already extracted
-                continue
+            # === Build FFmpeg filter chain for visual uniqueness ===
+            filters = []
             
-            try:
-                # Clip + force crop to 9:16 (720x1280) + strip audio
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-ss", str(scene_ts),
-                    "-i", source_path,
-                    "-t", str(this_clip_duration),
-                    "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
-                    "-an",  # Strip audio (we add our own trending sound)
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-movflags", "+faststart",
-                    clip_path
-                ]
+            # 1. Speed variation
+            if abs(speed_factor - 1.0) > 0.02:
+                filters.append(f"setpts={1.0/speed_factor}*PTS")
+            
+            # 2. Scale up with crop headroom
+            scale_extra = random.randint(20, 80)
+            filters.append(f"scale={720 + scale_extra}:{1280 + scale_extra}:force_original_aspect_ratio=increase")
+            
+            # 3. Random crop offset (not always dead center)
+            crop_x = random.randint(0, scale_extra)
+            crop_y = random.randint(0, scale_extra)
+            filters.append(f"crop=720:1280:{crop_x}:{crop_y}")
+            
+            # 4. Random horizontal flip (50% chance)
+            if random.random() < 0.5:
+                filters.append("hflip")
+            
+            # 5. Random hue/brightness/saturation
+            hue_shift = random.uniform(-30, 30)
+            brightness = random.uniform(-0.1, 0.1)
+            saturation = random.uniform(0.85, 1.15)
+            filters.append(f"eq=brightness={brightness:.3f}:saturation={saturation:.2f}")
+            filters.append(f"hue=h={hue_shift:.1f}")
+            
+            filter_chain = ",".join(filters)
+            
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_time),
+                "-i", source_path,
+                "-t", str(adjusted_duration),
+                "-vf", filter_chain,
+                "-an",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-movflags", "+faststart",
+                "-t", str(duration),
+                output_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            
+            if result.returncode == 0:
+                transforms_log = f"speed={speed_factor:.2f}x, hue={hue_shift:+.0f}°, bright={brightness:+.2f}, sat={saturation:.2f}"
+                logger.info(f"Unique clip: {duration}s from {start_time:.1f}s [{transforms_log}]")
+                return True
+            else:
+                logger.error(f"Transform clip failed: {result.stderr[:200]}")
+                return False
                 
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                
-                if result.returncode == 0 and clip_path.exists():
-                    extracted += 1
-                    if extracted % 10 == 0:
-                        logger.info(f"  Extracted {extracted} clips so far...")
-                else:
-                    logger.debug(f"  Clip {i} failed: {result.stderr[:100]}")
-                    
-            except Exception as e:
-                logger.debug(f"  Clip {i} extraction error: {e}")
-                continue
-        
-        logger.info(f"Extracted {extracted} scene clips from {source_name}")
-        return extracted
+        except Exception as e:
+            logger.error(f"clip_with_transforms failed: {e}")
+            return False
     
     def clip_stock_footage(self, source_path: str, output_path: str, duration: int = 8) -> bool:
         """
-        Clip a stock video to a short segment (7-10 seconds) for TikTok.
-        Picks a random start point and crops to 9:16 if needed.
-        
-        Args:
-            source_path: Path to full stock video
-            output_path: Path for clipped output
-            duration: Target clip length in seconds
-            
-        Returns:
-            True if successful
+        Basic clip fallback: clip + crop to 9:16 without visual transforms.
+        Used when clip_with_transforms fails.
         """
         try:
-            # Get video duration first
             probe_cmd = [
                 "ffprobe", "-v", "error",
                 "-show_entries", "format=duration",
@@ -846,37 +777,35 @@ class VideoGenerator:
             total_duration = float(probe_result.stdout.strip() or "0")
             
             if total_duration < duration + 1:
-                # Video too short, use the whole thing
                 start_time = 0
             else:
-                # Random start point, leaving room for the clip
                 max_start = total_duration - duration - 1
                 start_time = random.uniform(0, max(0, max_start))
             
-            # Clip + ensure 9:16 + normalize to 720x1280
             cmd = [
                 "ffmpeg", "-y",
                 "-ss", str(start_time),
                 "-i", source_path,
                 "-t", str(duration),
                 "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
-                "-an",  # Strip audio (we add our own sound)
+                "-an",
                 "-c:v", "libx264",
                 "-preset", "fast",
+                "-movflags", "+faststart",
                 output_path
             ]
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
             if result.returncode == 0:
-                logger.info(f"Stock clip created: {duration}s from {start_time:.1f}s")
+                logger.info(f"Basic clip created: {duration}s from {start_time:.1f}s")
                 return True
             else:
-                logger.error(f"Clip failed: {result.stderr[:200]}")
+                logger.error(f"Basic clip failed: {result.stderr[:200]}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Stock clipping failed: {e}")
+            logger.error(f"clip_stock_footage failed: {e}")
             return False
     
     def generate_stock_video(
@@ -884,59 +813,78 @@ class VideoGenerator:
         text_overlay: Optional[str] = None,
     ) -> 'GeneratedVideo':
         """
-        Generate a video using unique scene clips from YouTube compilations.
+        Generate a video using Pexels stock footage + visual uniqueness transforms.
         
         Pipeline:
-        1. Pick random scene clip (auto-fetch + extract if cache is low)
-        2. Already 9:16 cropped to 720x1280 from extraction step
-        3. Add Loom-style multi-line text overlay ("Moot me" x8)
-        4. Add trending sound
-        5. Strip metadata
+        1. Pick random stock clip (auto-fetch from Pexels if cache is low)
+        2. Clip + apply visual transforms (hue, speed, flip, brightness, crop offset)
+        3. Force crop to 9:16 (720x1280)
+        4. Add Loom-style multi-line text overlay
+        5. Add trending sound
+        6. Strip metadata
         
-        Cost: $0.00 — uses free YouTube footage with unique scene cuts
+        Cost: $0.00 — each clip is visually unique even from same source
         """
         start_time = time.time()
         
-        # Ensure we have scene clips available
-        scene_dir = self.output_dir / "scene_clips"
-        scene_dir.mkdir(parents=True, exist_ok=True)
-        scene_clips = list(scene_dir.glob("*.mp4"))
+        # Ensure we have stock footage
+        stock_dir = self.output_dir / "stock_clips"
+        stock_dir.mkdir(parents=True, exist_ok=True)
+        stock_clips = list(stock_dir.glob("*.mp4"))
         
-        if len(scene_clips) < 5:
-            logger.info("Low scene clip cache — fetching YouTube sources and extracting...")
-            self._replenish_scene_clips()
-            scene_clips = list(scene_dir.glob("*.mp4"))
+        if len(stock_clips) < 3:
+            logger.info("Low stock footage cache — fetching from Pexels...")
+            self.fetch_stock_footage(count=15)
+            stock_clips = list(stock_dir.glob("*.mp4"))
         
-        if not scene_clips:
-            logger.error("No scene clips available — YouTube fetch/extract may have failed. Check logs.")
+        if not stock_clips:
+            logger.error("No stock footage available. Check PEXELS_API_KEY.")
             return GeneratedVideo(
                 success=False,
-                error="No scene clips available. YouTube download or scene extraction failed.",
+                error="No stock footage available. Check PEXELS_API_KEY env var.",
                 cost_usd=0.00
             )
         
-        # 1. Pick a scene clip NOT already used in this batch
-        unused_clips = [c for c in scene_clips if c.name not in self._used_clips]
+        # 1. Pick a stock clip NOT already used in this batch
+        unused_clips = [c for c in stock_clips if c.name not in self._used_clips]
         if not unused_clips:
-            # All clips used — reset tracker and try to get more
-            logger.info("All scene clips used in this batch — resetting tracker and fetching more")
+            logger.info("All stock clips used — resetting tracker and fetching more")
             self._used_clips.clear()
-            self._replenish_scene_clips()
-            scene_clips = list(scene_dir.glob("*.mp4"))
-            unused_clips = scene_clips
+            self.fetch_stock_footage(count=10)
+            stock_clips = list(stock_dir.glob("*.mp4"))
+            unused_clips = stock_clips
         
         source_clip = random.choice(unused_clips)
-        self._used_clips.add(source_clip.name)  # Mark as used
-        logger.info(f"Using scene clip: {source_clip.name} (used {len(self._used_clips)}/{len(scene_clips)} unique clips)")
+        self._used_clips.add(source_clip.name)
+        logger.info(f"Using stock clip: {source_clip.name} (used {len(self._used_clips)}/{len(stock_clips)} unique)")
         
-        # 2. Scene clip is already 9:16 (720x1280) — just copy it for processing
+        # 2. Clip + apply visual transforms for uniqueness
+        clip_duration = random.randint(7, 10)
         video_filename = f"teamwork_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
         raw_clip_path = self.output_dir / f"raw_{video_filename}"
         final_video_path = self.output_dir / video_filename
         
-        # Copy scene clip to working file
-        import shutil
-        shutil.copy2(str(source_clip), str(raw_clip_path))
+        clip_success = self.clip_with_transforms(
+            str(source_clip),
+            str(raw_clip_path),
+            duration=clip_duration
+        )
+        
+        if not clip_success:
+            # Fallback: basic clip without transforms
+            clip_success = self.clip_stock_footage(
+                str(source_clip),
+                str(raw_clip_path),
+                duration=clip_duration
+            )
+        
+        if not clip_success:
+            logger.error("Both transform and basic clip failed")
+            return GeneratedVideo(
+                success=False,
+                error="Stock clip processing failed",
+                cost_usd=0.00
+            )
         
         # 3. Add Loom-style multi-line text overlay
         final_text_line = text_overlay or random.choice(TEXT_OVERLAY_LINES)
@@ -986,19 +934,20 @@ class VideoGenerator:
         duration = time.time() - start_time
         
         if final_video_path.exists():
-            logger.info(f"Scene clip video generated in {duration:.1f}s: {final_video_path.name}")
+            logger.info(f"Unique stock video generated in {duration:.1f}s: {final_video_path.name}")
             return GeneratedVideo(
                 success=True,
                 video_path=str(final_video_path),
                 text_overlay=final_text_line,
-                cost_usd=0.00  # FREE!
+                cost_usd=0.00
             )
         else:
             return GeneratedVideo(
                 success=False,
-                error="Scene clip video pipeline failed",
+                error="Stock video pipeline failed",
                 cost_usd=0.00
             )
+    
     
     def _replenish_scene_clips(self):
         """

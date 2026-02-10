@@ -25,8 +25,5 @@ loguru>=0.7.2
 # Utilities
 python-dateutil>=2.8.2
 
-# Video Sources
-yt-dlp>=2024.1.0
-
 # Encryption
 cryptography>=42.0.0
