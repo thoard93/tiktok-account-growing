@@ -272,8 +272,11 @@ class VideoGenerator:
             
             cmd = [
                 "ffmpeg", "-y",
+                "-threads", "1",
                 "-i", input_video_path,
                 "-vf", vf_string,
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
                 "-codec:a", "copy",
                 output_video_path
             ]
@@ -316,8 +319,9 @@ class VideoGenerator:
                 "-fflags", "+bitexact",   # Remove encoder signatures
                 "-flags:v", "+bitexact",
                 "-flags:a", "+bitexact",
+                "-threads", "1",
                 "-c:v", "libx264",        # Re-encode video
-                "-preset", "fast",
+                "-preset", "ultrafast",
                 "-crf", "23",
                 "-c:a", "aac",            # Re-encode audio
                 "-b:a", "128k",
@@ -613,7 +617,7 @@ class VideoGenerator:
                         "query": query,
                         "per_page": min(count, 15),
                         "orientation": "portrait",
-                        "size": "medium",
+                        "size": "small",
                     },
                     headers={"Authorization": api_key}
                 )
@@ -711,8 +715,8 @@ class VideoGenerator:
             if abs(speed_factor - 1.0) > 0.02:
                 filters.append(f"setpts={1.0/speed_factor}*PTS")
             
-            # 2. Scale up with crop headroom
-            scale_extra = random.randint(20, 80)
+            # 2. Scale up with crop headroom (small extra to save RAM)
+            scale_extra = random.randint(10, 40)
             filters.append(f"scale={720 + scale_extra}:{1280 + scale_extra}:force_original_aspect_ratio=increase")
             
             # 3. Random crop offset (not always dead center)
@@ -735,13 +739,14 @@ class VideoGenerator:
             
             cmd = [
                 "ffmpeg", "-y",
+                "-threads", "1",
                 "-ss", str(start_time),
                 "-i", source_path,
                 "-t", str(adjusted_duration),
                 "-vf", filter_chain,
                 "-an",
                 "-c:v", "libx264",
-                "-preset", "fast",
+                "-preset", "ultrafast",
                 "-movflags", "+faststart",
                 "-t", str(duration),
                 output_path
@@ -784,13 +789,14 @@ class VideoGenerator:
             
             cmd = [
                 "ffmpeg", "-y",
+                "-threads", "1",
                 "-ss", str(start_time),
                 "-i", source_path,
                 "-t", str(duration),
                 "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
                 "-an",
                 "-c:v", "libx264",
-                "-preset", "fast",
+                "-preset", "ultrafast",
                 "-movflags", "+faststart",
                 output_path
             ]
