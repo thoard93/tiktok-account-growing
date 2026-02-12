@@ -447,41 +447,26 @@ class VideoGenerator:
     
     def get_random_trending_sound(self) -> Optional[Path]:
         """
-        Pick a random trending sound. Auto-fetches from Freesound.org if cache is low.
-        Falls back to teamwork_trend.mp3 if everything fails.
+        Pick a random sound from assets/sounds/ directory (local files only).
+        User adds their own sounds — no API fetching.
         
         Returns:
             Path to a random sound file, or None if none available
         """
-        # Check cached trending sounds
-        trending_files = list(self.trending_sounds_dir.glob("*.mp3")) + \
-                         list(self.trending_sounds_dir.glob("*.wav")) + \
-                         list(self.trending_sounds_dir.glob("*.m4a"))
+        # Collect all sound files from assets/sounds/ and subdirectories
+        sound_files = []
+        for ext in ('*.mp3', '*.wav', '*.m4a', '*.ogg'):
+            sound_files.extend(self.sounds_dir.rglob(ext))
         
-        # Filter out README files
-        trending_files = [f for f in trending_files if f.suffix in ('.mp3', '.wav', '.m4a')]
+        # Filter out README and other non-audio files
+        sound_files = [f for f in sound_files if f.suffix in ('.mp3', '.wav', '.m4a', '.ogg')]
         
-        # Auto-fetch if cache has fewer than 5 sounds
-        if len(trending_files) < 5:
-            fetched = self._fetch_sounds_from_freesound(count=8)
-            if fetched > 0:
-                # Refresh file list
-                trending_files = list(self.trending_sounds_dir.glob("*.mp3")) + \
-                                 list(self.trending_sounds_dir.glob("*.wav")) + \
-                                 list(self.trending_sounds_dir.glob("*.m4a"))
-        
-        if trending_files:
-            chosen = random.choice(trending_files)
-            logger.info(f"Using trending sound: {chosen.name}")
+        if sound_files:
+            chosen = random.choice(sound_files)
+            logger.info(f"Using local sound: {chosen.name} ({len(sound_files)} available)")
             return chosen
         
-        # Fall back to teamwork_trend.mp3
-        fallback = self.sounds_dir / "teamwork_trend.mp3"
-        if fallback.exists():
-            logger.info("No trending sounds found, using teamwork_trend.mp3")
-            return fallback
-        
-        logger.warning("No sound files available at all")
+        logger.warning("No sound files in assets/sounds/ — video will have no audio")
         return None
     
     def add_sound_to_video(
