@@ -79,7 +79,7 @@ class AutomationScheduler:
                 }
             return {
                 "enabled": False,
-                "posts_per_phone": 6,
+                "posts_per_phone": 3,
                 "enable_warmup": True,
                 "auto_delete": True,
                 "warmup_hour_est": 8,
@@ -422,9 +422,24 @@ class AutomationScheduler:
             from app.services.video_generator import get_video_generator
             generator = get_video_generator()
             
-            # Generate as many videos as we have clips for (builds buffer)
-            # Stop when we run out of scene clips or hit reasonable limit
-            max_videos = max(min_needed, 30)  # Generate up to 30 or min needed
+            # Check existing video library size — cap at 100 total
+            VIDEO_LIBRARY_CAP = 100
+            existing_videos = list(generator.output_dir.glob("teamwork_*.mp4"))
+            existing_count = len(existing_videos)
+            
+            if existing_count >= VIDEO_LIBRARY_CAP:
+                logger.info(f"Video library full: {existing_count}/{VIDEO_LIBRARY_CAP} — skipping generation")
+                self._log_pipeline(db, "video_gen", "skipped",
+                                   details={"reason": "library_full",
+                                            "existing": existing_count,
+                                            "cap": VIDEO_LIBRARY_CAP})
+                return
+            
+            # Generate up to the cap, stopping when clips run out
+            room_left = VIDEO_LIBRARY_CAP - existing_count
+            max_videos = min(room_left, max(min_needed, 30))
+            logger.info(f"Video library: {existing_count}/{VIDEO_LIBRARY_CAP} — generating up to {max_videos} more")
+            
             results = []
             consecutive_fails = 0
             
@@ -553,28 +568,17 @@ class AutomationScheduler:
                                    details={"reason": "no_videos_available"})
                 return
             
-            # STAGGER: Calculate this slot's share of videos
+            # STAGGER: Post 1 video per phone per slot
+            # With 3 posts/day and 3 slots, each slot posts 1 per phone
             posts_per_phone = config["posts_per_phone"]
-            total_posts_today = posts_per_phone * len(phone_ids)
-            posts_per_slot = max(1, total_posts_today // num_slots)
+            posts_this_slot = max(1, posts_per_phone // num_slots)  # 3 / 3 = 1 per phone
             
-            # Calculate which videos belong to this slot
-            slot_start = slot_index * posts_per_slot * len(phone_ids)
-            slot_end = slot_start + posts_per_slot * len(phone_ids)
-            slot_videos = all_video_filenames[slot_start:slot_end]
-            
-            # If last slot, take any remaining videos too
-            if slot_index == num_slots - 1:
-                slot_videos = all_video_filenames[slot_start:]
-            
-            # If not enough videos for all phones in this slot,
-            # still post what we have (don't skip entirely!)
-            if not slot_videos:
-                # Try to use ALL available videos if slot math gives empty
-                slot_videos = all_video_filenames[:max(1, len(phone_ids))]
+            # Take exactly posts_this_slot videos per phone
+            videos_needed = posts_this_slot * len(phone_ids)
+            slot_videos = all_video_filenames[:videos_needed]
             
             if not slot_videos:
-                logger.info(f"Slot {slot_index + 1}: No videos available at all")
+                logger.info(f"Slot {slot_index + 1}: No videos available")
                 self._log_pipeline(db, "posting", "skipped",
                                    details={"reason": "no_videos_for_slot", "slot": slot_index + 1})
                 return
@@ -585,7 +589,7 @@ class AutomationScheduler:
                 logger.info(f"Slot {slot_index + 1}: Only {len(slot_videos)} videos for {len(phone_ids)} phones — posting partial")
                 active_phone_ids = phone_ids[:len(slot_videos)]
             
-            logger.info(f"Slot {slot_index + 1}: Posting {len(slot_videos)} videos to {len(active_phone_ids)} phones")
+            logger.info(f"Slot {slot_index + 1}: Posting {len(slot_videos)} videos to {len(active_phone_ids)} phones ({posts_this_slot} per phone)")
             
             # Post this slot's videos to phones
             post_resp = requests.post(
@@ -594,7 +598,7 @@ class AutomationScheduler:
                     "videos": slot_videos,
                     "phone_ids": active_phone_ids,
                     "caption": "",
-                    "hashtags": "#ifb #moots? #mootmeup #fyp #glazer",
+                    "hashtags": "#teamwork #teamworktrend #teamworkchallenge #teamwork1minago #teamwork1hourago",
                     "auto_start": True,
                     "auto_stop": True,
                     "auto_delete": config["auto_delete"],

@@ -224,7 +224,7 @@ class ScheduleConfig(Base):
     phone_ids = Column(JSON, default=[])  # Legacy — v2.0 uses per-account scheduling
     
     # Configuration
-    posts_per_phone = Column(Integer, default=6)
+    posts_per_phone = Column(Integer, default=3)
     enable_warmup = Column(Boolean, default=True)
     auto_delete = Column(Boolean, default=True)
     
