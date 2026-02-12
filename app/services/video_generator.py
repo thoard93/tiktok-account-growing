@@ -545,26 +545,39 @@ class VideoGenerator:
     # Each clip gets visual uniqueness transforms
     # ===========================
     
-    # YouTube search queries — ONLY footage/timelapse compilations (NO tutorials)
+    # YouTube search queries — ONLY footage/timelapse compilations (NO tutorials/talking)
     YOUTUBE_SEARCH_QUERIES = [
+        # City timelapses
         "4K city timelapse compilation no talking",
         "city night timelapse 4K compilation",
-        "nature scenery 4K no commentary",
-        "sunset timelapse 4K collection",
         "drone city footage 4K no music",
         "cinematic b-roll 4K compilation",
         "city skyline timelapse night 4K",
-        "ocean waves 4K relaxing footage",
-        "mountain landscape 4K timelapse",
-        "aerial city drone 4K footage",
         "tokyo night walk 4K footage",
         "new york city 4K timelapse",
         "london timelapse 4K night",
-        "nature 4K scenery relaxing",
         "city traffic night 4K timelapse",
         "rain city ambience 4K footage",
         "neon city lights 4K walking",
+        # Nature timelapses & compilations
+        "nature scenery 4K no commentary",
+        "sunset timelapse 4K collection",
+        "ocean waves 4K relaxing footage",
+        "mountain landscape 4K timelapse",
+        "nature 4K scenery relaxing",
         "countryside 4K drone footage",
+        "waterfall 4K nature compilation no talking",
+        "forest drone footage 4K no commentary",
+        "northern lights timelapse 4K compilation",
+        "desert landscape 4K drone footage",
+        "tropical beach 4K relaxing footage no talking",
+        "autumn leaves 4K timelapse compilation",
+        "snow mountain 4K drone footage no music",
+        "river nature 4K scenery relaxing footage",
+        "volcano timelapse 4K compilation",
+        "starry night sky 4K timelapse no talking",
+        "coral reef underwater 4K footage compilation",
+        "aerial nature 4K drone compilation no commentary",
     ]
     
     # Pexels fallback queries (if YouTube fails)
@@ -1074,7 +1087,7 @@ class VideoGenerator:
             )
         
         # 2. Clip + apply visual transforms
-        clip_duration = random.randint(7, 10)
+        clip_duration = 7  # Fixed 7-second clips
         video_filename = f"teamwork_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
         raw_clip_path = self.output_dir / f"raw_{video_filename}"
         final_video_path = self.output_dir / video_filename
