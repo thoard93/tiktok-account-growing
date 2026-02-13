@@ -2128,11 +2128,13 @@ async def sync_accounts_from_geelark(
 @router.post("/followers/snapshot")
 def take_follower_snapshot(db: Session = Depends(get_db)):
     """
-    Record current follower counts for all scheduled accounts.
-    Called daily by scheduler or manually via dashboard.
+    Scrape real follower counts from TikTok, update Account records,
+    then record daily snapshot. Called by scheduler or manually.
     """
     from app.models.account import FollowerSnapshot
     from datetime import date
+    import requests as req
+    import re, json
     
     today = date.today()
     accounts = db.query(Account).filter(Account.schedule_enabled == True).all()
@@ -2140,21 +2142,100 @@ def take_follower_snapshot(db: Session = Depends(get_db)):
     if not accounts:
         return {"success": True, "message": "No scheduled accounts", "snapshots": 0}
     
+    # Proxy for TikTok requests (reuse YOUTUBE_PROXY if set)
+    proxy_url = os.environ.get("YOUTUBE_PROXY")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    
     created = 0
+    scraped = 0
+    errors = []
+    
     for account in accounts:
-        # Check if we already have a snapshot for today
+        username = account.tiktok_username
+        
+        # Try to scrape real counts from TikTok profile
+        if username:
+            # Strip @ prefix if present
+            username = username.lstrip("@")
+            try:
+                resp = req.get(
+                    f"https://www.tiktok.com/@{username}",
+                    headers=headers,
+                    proxies=proxies,
+                    timeout=10
+                )
+                
+                if resp.status_code == 200:
+                    page = resp.text
+                    
+                    # Try to parse stats from TikTok's embedded JSON
+                    # Look for __UNIVERSAL_DATA_FOR_REHYDRATION__ or SIGI_STATE
+                    followers = None
+                    following = None
+                    videos = None
+                    
+                    # Method 1: Parse from UNIVERSAL_DATA JSON
+                    match = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', page, re.DOTALL)
+                    if match:
+                        try:
+                            data = json.loads(match.group(1))
+                            # Navigate to user stats
+                            user_info = data.get("__DEFAULT_SCOPE__", {}).get("webapp.user-detail", {}).get("userInfo", {})
+                            stats = user_info.get("stats", {})
+                            if stats:
+                                followers = stats.get("followerCount")
+                                following = stats.get("followingCount")
+                                videos = stats.get("videoCount")
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+                    
+                    # Method 2: Fallback - regex for follower count from meta tags
+                    if followers is None:
+                        meta_match = re.search(r'"followerCount"\s*:\s*(\d+)', page)
+                        if meta_match:
+                            followers = int(meta_match.group(1))
+                        following_match = re.search(r'"followingCount"\s*:\s*(\d+)', page)
+                        if following_match:
+                            following = int(following_match.group(1))
+                        video_match = re.search(r'"videoCount"\s*:\s*(\d+)', page)
+                        if video_match:
+                            videos = int(video_match.group(1))
+                    
+                    # Update account with real counts
+                    if followers is not None:
+                        account.followers_count = followers
+                        scraped += 1
+                    if following is not None:
+                        account.following_count = following
+                    if videos is not None:
+                        account.posts_count = videos
+                    
+                    logger.info(f"Scraped @{username}: {followers} followers, {following} following, {videos} videos")
+                else:
+                    errors.append(f"@{username}: HTTP {resp.status_code}")
+                    logger.warning(f"TikTok scrape failed for @{username}: {resp.status_code}")
+                    
+            except Exception as e:
+                errors.append(f"@{username}: {str(e)[:50]}")
+                logger.warning(f"TikTok scrape error for @{username}: {e}")
+        
+        # Record snapshot (uses real counts if scraped, or DB values as fallback)
         existing = db.query(FollowerSnapshot).filter(
             FollowerSnapshot.account_id == account.id,
             FollowerSnapshot.snapshot_date == today
         ).first()
         
         if existing:
-            # Update existing snapshot
             existing.followers_count = account.followers_count or 0
             existing.following_count = account.following_count or 0
             existing.posts_count = account.posts_count or 0
         else:
-            # Create new snapshot
             snapshot = FollowerSnapshot(
                 account_id=account.id,
                 snapshot_date=today,
@@ -2171,6 +2252,8 @@ def take_follower_snapshot(db: Session = Depends(get_db)):
         "success": True,
         "snapshots_created": created,
         "accounts_tracked": len(accounts),
+        "accounts_scraped": scraped,
+        "errors": errors[:5] if errors else [],
         "date": str(today)
     }
 
