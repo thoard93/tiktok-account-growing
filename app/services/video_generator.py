@@ -61,21 +61,20 @@ IMAGE_PROMPT_TEMPLATES = [
 TEXT_OVERLAY_LINES = [
     "Moot me",
     "Teamwork trend",
-    "Follow me",
     "Moot me up",
     "Teamwork ifb",
 ]
 
-# Captions for TikTok posts — hashtag-focused like the Loom walkthrough
+# Captions for TikTok posts — teamwork hashtags
 CAPTIONS = [
-    "#ifb #moots? #mootmeup #fyp #glazer",
-    "#ifb #moots? #teamwork #fyp #glazer",
-    "#ifb #moots #mootmeup #fyp #teamworktrend",
-    "#ifb #moots? #mootmeup #fyp",
+    "#teamwork #teamworktrend #teamworkchallenge #teamwork1minago #teamwork1hourago",
+    "#teamwork #teamworktrend #teamworkchallenge #fyp",
+    "#teamwork #teamworkchallenge #teamwork1minago #teamwork1hourago",
+    "#teamworktrend #teamworkchallenge #teamwork #fyp",
 ]
 
-# Hashtags — proven growth format from Loom walkthrough
-HASHTAGS = "#ifb #moots? #mootmeup #fyp #glazer"
+# Hashtags — teamwork format
+HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamwork1minago #teamwork1hourago"
 
 # Cinematic video motion prompts for Seedance 1.5 Pro
 VIDEO_MOTION_PROMPTS = [

@@ -673,6 +673,29 @@ class AutomationScheduler:
             db.close()
     
     # =====================================================================
+    # Follower Tracking
+    # =====================================================================
+    
+    def take_follower_snapshot(self):
+        """Record daily follower counts for all scheduled accounts."""
+        logger.info("=" * 50)
+        logger.info("DAILY FOLLOWER SNAPSHOT")
+        logger.info("=" * 50)
+        
+        try:
+            import requests as req
+            internal_base = os.getenv("RENDER_EXTERNAL_URL", os.getenv("API_BASE_URL", "http://localhost:8000")).rstrip("/")
+            resp = req.post(f"{internal_base}/api/followers/snapshot", timeout=15)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info(f"Follower snapshot recorded: {data.get('accounts_tracked', 0)} accounts tracked")
+            else:
+                logger.error(f"Follower snapshot failed: {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Follower snapshot error: {e}")
+    
+    # =====================================================================
     # Scheduler Control
     # =====================================================================
     
@@ -720,6 +743,16 @@ class AutomationScheduler:
             self.check_pending_tasks,
             IntervalTrigger(minutes=5),
             id="task_monitor",
+            replace_existing=True,
+            max_instances=1
+        )
+        
+        # Daily Follower Snapshot: 11 PM EST (after all posting is done)
+        snapshot_utc = est_to_utc(23)
+        self.scheduler.add_job(
+            self.take_follower_snapshot,
+            CronTrigger(hour=snapshot_utc, minute=0),
+            id="follower_snapshot",
             replace_existing=True,
             max_instances=1
         )

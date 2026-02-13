@@ -2119,3 +2119,108 @@ async def sync_accounts_from_geelark(
         "total_accounts": total,
         "phones_found": len(phones),
     }
+
+
+# ===========================
+# Follower Tracking
+# ===========================
+
+@router.post("/followers/snapshot")
+def take_follower_snapshot(db: Session = Depends(get_db)):
+    """
+    Record current follower counts for all scheduled accounts.
+    Called daily by scheduler or manually via dashboard.
+    """
+    from app.models.account import FollowerSnapshot
+    from datetime import date
+    
+    today = date.today()
+    accounts = db.query(Account).filter(Account.schedule_enabled == True).all()
+    
+    if not accounts:
+        return {"success": True, "message": "No scheduled accounts", "snapshots": 0}
+    
+    created = 0
+    for account in accounts:
+        # Check if we already have a snapshot for today
+        existing = db.query(FollowerSnapshot).filter(
+            FollowerSnapshot.account_id == account.id,
+            FollowerSnapshot.snapshot_date == today
+        ).first()
+        
+        if existing:
+            # Update existing snapshot
+            existing.followers_count = account.followers_count or 0
+            existing.following_count = account.following_count or 0
+            existing.posts_count = account.posts_count or 0
+        else:
+            # Create new snapshot
+            snapshot = FollowerSnapshot(
+                account_id=account.id,
+                snapshot_date=today,
+                followers_count=account.followers_count or 0,
+                following_count=account.following_count or 0,
+                posts_count=account.posts_count or 0
+            )
+            db.add(snapshot)
+            created += 1
+    
+    db.commit()
+    
+    return {
+        "success": True,
+        "snapshots_created": created,
+        "accounts_tracked": len(accounts),
+        "date": str(today)
+    }
+
+
+@router.get("/followers/history")
+def get_follower_history(
+    days: int = Query(default=30, ge=1, le=90),
+    account_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get follower count history for charting.
+    Returns daily snapshots for the last N days.
+    """
+    from app.models.account import FollowerSnapshot
+    from datetime import date, timedelta
+    
+    since = date.today() - timedelta(days=days)
+    
+    query = db.query(FollowerSnapshot).filter(
+        FollowerSnapshot.snapshot_date >= since
+    )
+    
+    if account_id:
+        query = query.filter(FollowerSnapshot.account_id == account_id)
+    
+    snapshots = query.order_by(
+        FollowerSnapshot.snapshot_date,
+        FollowerSnapshot.account_id
+    ).all()
+    
+    # Group by account
+    history = {}
+    for snap in snapshots:
+        acct = db.query(Account).filter(Account.id == snap.account_id).first()
+        name = acct.geelark_profile_name or acct.tiktok_username or f"Account #{snap.account_id}"
+        
+        if name not in history:
+            history[name] = []
+        
+        history[name].append({
+            "date": str(snap.snapshot_date),
+            "followers": snap.followers_count,
+            "following": snap.following_count,
+            "posts": snap.posts_count
+        })
+    
+    return {
+        "success": True,
+        "days": days,
+        "accounts": history
+    }
+

@@ -266,3 +266,24 @@ class PipelineLog(Base):
     # Timestamps
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+
+
+class FollowerSnapshot(Base):
+    """
+    Daily follower count snapshot per account.
+    Used to track growth over time and display charts on the dashboard.
+    """
+    __tablename__ = "follower_snapshots"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False)
+    snapshot_date = Column(Date, nullable=False)
+    followers_count = Column(Integer, default=0)
+    following_count = Column(Integer, default=0)
+    posts_count = Column(Integer, default=0)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    account = relationship("Account")

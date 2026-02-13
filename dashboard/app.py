@@ -366,6 +366,74 @@ if page == "📊 Dashboard":
             st.markdown("**Version:** v2.0.0")
     else:
         st.error("Cannot reach API backend")
+    
+    # ===========================
+    # Follower Growth Chart
+    # ===========================
+    
+    st.markdown("---")
+    st.markdown("### 📈 Follower Growth")
+    
+    chart_col1, chart_col2 = st.columns([3, 1])
+    with chart_col2:
+        days_range = st.selectbox("Date Range", [7, 14, 30, 60], index=2, format_func=lambda x: f"Last {x} days")
+        if st.button("📸 Take Snapshot Now", use_container_width=True):
+            snap_result = api_post("/followers/snapshot")
+            if snap_result and snap_result.get("success"):
+                st.success(f"Snapshot taken! {snap_result.get('accounts_tracked', 0)} accounts tracked")
+                st.rerun()
+            else:
+                st.error("Snapshot failed")
+    
+    with chart_col1:
+        history = api_get(f"/followers/history?days={days_range}")
+        if history and history.get("accounts"):
+            accounts_data = history["accounts"]
+            
+            # Build DataFrame for chart
+            chart_data = {}
+            for acct_name, snapshots in accounts_data.items():
+                for snap in snapshots:
+                    date = snap["date"]
+                    if date not in chart_data:
+                        chart_data[date] = {}
+                    chart_data[date][acct_name] = snap["followers"]
+            
+            if chart_data:
+                df = pd.DataFrame.from_dict(chart_data, orient="index")
+                df.index = pd.to_datetime(df.index)
+                df = df.sort_index()
+                
+                st.line_chart(df, use_container_width=True)
+                
+                # Current stats table
+                st.markdown("**Current Follower Counts:**")
+                stats_cols = st.columns(min(len(accounts_data), 4))
+                for i, (name, snaps) in enumerate(accounts_data.items()):
+                    with stats_cols[i % len(stats_cols)]:
+                        latest = snaps[-1] if snaps else {}
+                        followers = latest.get("followers", 0)
+                        
+                        # Growth calculation
+                        if len(snaps) >= 2:
+                            growth = followers - snaps[0]["followers"]
+                            growth_str = f"+{growth}" if growth >= 0 else str(growth)
+                            growth_color = "#66bb6a" if growth >= 0 else "#ef5350"
+                        else:
+                            growth_str = "—"
+                            growth_color = "#8080b0"
+                        
+                        st.markdown(f"""
+                        <div class="metric-card" style="padding: 12px;">
+                            <div style="color: #a0a0d0; font-size: 0.8rem;">{name}</div>
+                            <div style="color: #e0e0ff; font-size: 1.4rem; font-weight: 700;">{followers}</div>
+                            <div style="color: {growth_color}; font-size: 0.85rem;">{growth_str} ({days_range}d)</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                st.info("No follower data yet. Click 'Take Snapshot Now' to start tracking!")
+        else:
+            st.info("No follower data yet. Click 'Take Snapshot Now' to start tracking! Snapshots are auto-taken daily at 11 PM EST.")
 
 
 # ===========================
