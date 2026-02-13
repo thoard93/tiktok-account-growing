@@ -414,20 +414,51 @@ if page == "📊 Dashboard":
                         latest = snaps[-1] if snaps else {}
                         followers = latest.get("followers", 0)
                         
-                        # Growth calculation
+                        # Total growth over selected range
                         if len(snaps) >= 2:
-                            growth = followers - snaps[0]["followers"]
-                            growth_str = f"+{growth}" if growth >= 0 else str(growth)
-                            growth_color = "#66bb6a" if growth >= 0 else "#ef5350"
+                            total_growth = followers - snaps[0]["followers"]
+                            total_str = f"+{total_growth}" if total_growth >= 0 else str(total_growth)
+                            total_color = "#66bb6a" if total_growth >= 0 else "#ef5350"
+                            
+                            # Avg per day
+                            num_days = max(len(snaps) - 1, 1)
+                            avg_per_day = total_growth / num_days
+                            avg_str = f"+{avg_per_day:.1f}" if avg_per_day >= 0 else f"{avg_per_day:.1f}"
+                            
+                            # Last 7 days growth
+                            week_snaps = [s for s in snaps if s["date"] >= str(pd.Timestamp.now().date() - pd.Timedelta(days=7))]
+                            if len(week_snaps) >= 2:
+                                week_growth = week_snaps[-1]["followers"] - week_snaps[0]["followers"]
+                                week_str = f"+{week_growth}" if week_growth >= 0 else str(week_growth)
+                                week_color = "#66bb6a" if week_growth >= 0 else "#ef5350"
+                            else:
+                                week_str = "—"
+                                week_color = "#8080b0"
                         else:
-                            growth_str = "—"
-                            growth_color = "#8080b0"
+                            total_str = "—"
+                            total_color = "#8080b0"
+                            avg_str = "—"
+                            week_str = "—"
+                            week_color = "#8080b0"
                         
                         st.markdown(f"""
-                        <div class="metric-card" style="padding: 12px;">
+                        <div class="metric-card" style="padding: 14px;">
                             <div style="color: #a0a0d0; font-size: 0.8rem;">{name}</div>
-                            <div style="color: #e0e0ff; font-size: 1.4rem; font-weight: 700;">{followers}</div>
-                            <div style="color: {growth_color}; font-size: 0.85rem;">{growth_str} ({days_range}d)</div>
+                            <div style="color: #e0e0ff; font-size: 1.5rem; font-weight: 700;">{followers}</div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 6px;">
+                                <div>
+                                    <div style="color: #8080b0; font-size: 0.65rem;">7-DAY</div>
+                                    <div style="color: {week_color}; font-size: 0.85rem; font-weight: 600;">{week_str}</div>
+                                </div>
+                                <div>
+                                    <div style="color: #8080b0; font-size: 0.65rem;">AVG/DAY</div>
+                                    <div style="color: {total_color}; font-size: 0.85rem; font-weight: 600;">{avg_str}</div>
+                                </div>
+                                <div>
+                                    <div style="color: #8080b0; font-size: 0.65rem;">{days_range}D TOTAL</div>
+                                    <div style="color: {total_color}; font-size: 0.85rem; font-weight: 600;">{total_str}</div>
+                                </div>
+                            </div>
                         </div>
                         """, unsafe_allow_html=True)
             else:
