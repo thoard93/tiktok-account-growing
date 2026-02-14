@@ -651,41 +651,51 @@ elif page == "👤 Accounts":
             st.markdown("---")
             
             # Column headers
-            hdr = st.columns([3, 2, 1, 1, 1, 1])
+            hdr = st.columns([3, 2, 2, 1, 1, 1, 1])
             with hdr[0]:
                 st.caption("**NAME**")
             with hdr[1]:
-                st.caption("**PHONE ID**")
+                st.caption("**TT USERNAME**")
             with hdr[2]:
-                st.caption("**STATUS**")
+                st.caption("**PHONE ID**")
             with hdr[3]:
-                st.caption("**SCHEDULED**")
+                st.caption("**STATUS**")
             with hdr[4]:
-                st.caption("**WARMUP**")
+                st.caption("**SCHEDULED**")
             with hdr[5]:
+                st.caption("**WARMUP**")
+            with hdr[6]:
                 st.caption("**POSTING**")
             
             # Account rows
             for account in accounts:
-                cols = st.columns([3, 2, 1, 1, 1, 1])
+                cols = st.columns([3, 2, 2, 1, 1, 1, 1])
                 
                 with cols[0]:
                     name = account.get("name", "Unknown")
-                    username = account.get("tiktok_username")
-                    if username:
-                        st.markdown(f"**{name}** · @{username}")
-                    else:
-                        st.markdown(f"**{name}**")
+                    st.markdown(f"**{name}**")
                 
                 with cols[1]:
+                    current_un = account.get("tiktok_username", "") or ""
+                    new_un = st.text_input(
+                        "TT", value=current_un,
+                        key=f"tt_un_{account['id']}",
+                        label_visibility="collapsed",
+                        placeholder="@username"
+                    )
+                    if new_un != current_un:
+                        api_post(f"/accounts/{account['id']}/schedule", {"tiktok_username": new_un})
+                        st.rerun()
+                
+                with cols[2]:
                     pid = account.get("phone_id", "")
                     st.caption(f"📱 {pid[:15]}..." if len(pid) > 15 else f"📱 {pid}" if pid else "No phone")
                 
-                with cols[2]:
+                with cols[3]:
                     status = account.get("status", "unknown")
                     st.markdown(status_badge(status), unsafe_allow_html=True)
                 
-                with cols[3]:
+                with cols[4]:
                     is_sched = account.get("schedule_enabled", False)
                     new_sched = st.checkbox(
                         "On", value=is_sched,
@@ -696,7 +706,7 @@ elif page == "👤 Accounts":
                         api_post(f"/accounts/{account['id']}/schedule", {"enabled": new_sched})
                         st.rerun()
                 
-                with cols[4]:
+                with cols[5]:
                     if account.get("schedule_enabled"):
                         w_val = account.get("schedule_warmup", True)
                         new_w = st.checkbox(
@@ -710,7 +720,7 @@ elif page == "👤 Accounts":
                     else:
                         st.write("—")
                 
-                with cols[5]:
+                with cols[6]:
                     if account.get("schedule_enabled"):
                         p_val = account.get("schedule_posting", True)
                         new_p = st.checkbox(

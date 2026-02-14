@@ -1988,6 +1988,8 @@ async def update_account_schedule(
         account.schedule_warmup = data["warmup"]
     if "posting" in data:
         account.schedule_posting = data["posting"]
+    if "tiktok_username" in data:
+        account.tiktok_username = data["tiktok_username"]
     
     account.updated_at = datetime.utcnow()
     db.commit()
