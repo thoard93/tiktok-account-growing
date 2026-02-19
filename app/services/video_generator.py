@@ -1,13 +1,15 @@
 """
-Teamwork Trend Video Generator v3.0
+Teamwork Trend Video Generator v4.0
 
 Full pipeline:
-1. Claude generates cinematic image prompt (master-level realism)
-2. Nano Banana Pro 2K creates 9:16 image
-3. Seedance 1.5 Pro converts to 720p 8s video (no audio)
-4. FFmpeg adds centered text overlay
-5. FFmpeg adds random trending sound/music
-6. FFmpeg strips metadata (removes AI fingerprints)
+1. JSON-structured prompt → Nano Banana Pro 1K creates ultra-realistic 9:16 image
+2. Hailuo 2.3 Standard converts to 6s 768P video
+3. FFmpeg adds centered text overlay
+4. FFmpeg adds random trending sound/music
+5. FFmpeg strips metadata (removes AI fingerprints)
+
+Image reuse: 1 base image → 3 videos per account via varied motion prompts.
+Cost: ~$0.18/video avg (was $0.26).
 """
 
 import os
@@ -42,18 +44,393 @@ class GeneratedVideo:
 # Teamwork Content Variations
 # ===========================
 
-# Image prompt templates (fallback if Claude is unavailable)
+# Ultra-realistic JSON prompt templates for Nano Banana Pro
+# Each scene is POV walking through nature/city — structured for maximum photorealism
+JSON_PROMPT_TEMPLATES = [
+    # 1. Beach golden hour
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "Sony A7IV",
+            "lens": "35mm prime",
+            "aspect_ratio": "9:16",
+            "style": "golden hour natural light, DSLR realism, Kodak Portra 400 film look"
+        },
+        "scene": {
+            "concept": "first-person POV walking along a pristine sandy beach at golden hour",
+            "location": "wide sandy beach with gentle waves",
+            "time": "golden hour, 30 minutes before sunset"
+        },
+        "environment": {
+            "foreground": ["wet sand with gentle footprint impressions", "foam from receding waves"],
+            "midground": ["a jogger running along the waterline in the distance", "seagulls scattered on the sand"],
+            "background": ["warm orange-pink sunset over the ocean horizon", "distant headland silhouette"],
+            "atmosphere": "salt air haze, warm golden light wrapping around everything"
+        },
+        "camera": {
+            "shot_type": "first-person POV looking forward at the horizon",
+            "aperture": "f/2.8",
+            "depth_of_field": "shallow, background softly blurred",
+            "perspective": "natural walking height, eye level"
+        },
+        "lighting": {
+            "type": "golden hour natural sunlight",
+            "direction": "low angle side-backlighting from the left",
+            "quality": "warm, soft, with gentle lens flare",
+            "shadows": "long and soft on the sand"
+        },
+        "colors_and_tone": {
+            "palette": "warm golden sand, coral sunset sky, turquoise water, natural skin tones",
+            "contrast": "medium, film-like",
+            "saturation": "natural, slightly warm"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "sand grains, water surface, natural light scatter",
+            "noise": "subtle ISO grain consistent with golden hour photography"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "plastic skin", "oversaturated", "HDR", "feet visible", "legs visible", "selfie", "wide angle distortion"]
+        }
+    },
+    # 2. Forest trail
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "Canon R5",
+            "lens": "35mm f/1.8",
+            "aspect_ratio": "9:16",
+            "style": "volumetric forest light, natural film grain, cinematic depth"
+        },
+        "scene": {
+            "concept": "first-person POV peaceful walk through a lush forest trail",
+            "location": "dense green forest with tall pines and ferns",
+            "time": "late morning, dappled sunlight"
+        },
+        "environment": {
+            "foreground": ["dirt path with exposed tree roots", "fern fronds at the edges"],
+            "midground": ["a hiker with backpack walking ahead on the trail", "fallen moss-covered log"],
+            "background": ["towering pine trees creating a natural canopy", "volumetric light rays filtering through branches"],
+            "atmosphere": "misty morning air, earthy smell, peaceful silence"
+        },
+        "camera": {
+            "shot_type": "first-person POV looking forward down the trail",
+            "aperture": "f/2.8",
+            "depth_of_field": "shallow with creamy bokeh background",
+            "perspective": "natural walking eye level"
+        },
+        "lighting": {
+            "type": "dappled forest sunlight, volumetric rays",
+            "direction": "overhead filtered through canopy, backlighting the path",
+            "quality": "soft with dramatic god rays",
+            "shadows": "complex dappled patterns on the forest floor"
+        },
+        "colors_and_tone": {
+            "palette": "rich earthy greens, warm brown bark, golden light shafts, cool shadow tones",
+            "contrast": "high in light shafts, soft in shadows",
+            "saturation": "natural with lush greens"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "bark texture, moss detail, leaf veins, dirt path",
+            "noise": "subtle natural grain"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion"]
+        }
+    },
+    # 3. City park autumn
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "Sony A7IV",
+            "lens": "50mm prime",
+            "aspect_ratio": "9:16",
+            "style": "autumn warmth, soft backlight, cinematic color grading"
+        },
+        "scene": {
+            "concept": "first-person POV leisurely stroll through a city park in peak autumn",
+            "location": "urban park lined with mature maple and oak trees",
+            "time": "late afternoon, warm autumn light"
+        },
+        "environment": {
+            "foreground": ["cobblestone walking path covered in fallen golden leaves"],
+            "midground": ["a couple walking their golden retriever ahead", "park bench with someone reading"],
+            "background": ["row of trees with fiery orange-red canopy", "soft city skyline visible through branches"],
+            "atmosphere": "crisp autumn air, golden leaves gently falling, warm afternoon glow"
+        },
+        "camera": {
+            "shot_type": "first-person POV walking forward through the park",
+            "aperture": "f/2.0",
+            "depth_of_field": "shallow, people and trees softly blurred",
+            "perspective": "natural eye level"
+        },
+        "lighting": {
+            "type": "warm autumn afternoon sunlight",
+            "direction": "low-angle backlighting through the trees",
+            "quality": "soft golden, with gentle lens flare through leaves",
+            "shadows": "long and warm on the path"
+        },
+        "colors_and_tone": {
+            "palette": "golden amber, burnt orange, russet red, warm brown, soft green",
+            "contrast": "medium-warm",
+            "saturation": "rich but natural autumn tones"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "individual leaf detail, cobblestone texture, bark patterns",
+            "noise": "subtle film grain, Kodak Portra warmth"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion"]
+        }
+    },
+    # 4. European cobblestone street
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "Fujifilm X-T5",
+            "lens": "23mm f/2.0",
+            "aspect_ratio": "9:16",
+            "style": "European travel photography, warm ambient lighting, film grain"
+        },
+        "scene": {
+            "concept": "first-person POV evening walk through a charming European cobblestone street",
+            "location": "narrow old-town street in southern Europe with stone buildings",
+            "time": "blue hour, just after sunset"
+        },
+        "environment": {
+            "foreground": ["worn cobblestone street glistening slightly from recent rain"],
+            "midground": ["warm outdoor café tables with candles", "locals chatting at a small bistro"],
+            "background": ["old stone buildings with colorful shutters", "warm string lights draped between buildings", "church bell tower silhouetted against blue-purple sky"],
+            "atmosphere": "romantic evening ambiance, warm café glow against cool twilight sky"
+        },
+        "camera": {
+            "shot_type": "first-person POV walking forward down the narrow street",
+            "aperture": "f/2.0",
+            "depth_of_field": "medium, string lights creating beautiful bokeh",
+            "perspective": "natural walking height"
+        },
+        "lighting": {
+            "type": "mixed warm café light and cool twilight",
+            "direction": "warm point-source lights from cafés and string lights",
+            "quality": "cozy warm interior glow contrasting with blue hour sky",
+            "shadows": "soft deep shadows in doorways and alleys"
+        },
+        "colors_and_tone": {
+            "palette": "warm amber from lights, cool blue-purple sky, stone beige, terracotta",
+            "contrast": "medium-high for drama",
+            "saturation": "rich but natural"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "wet cobblestone reflections, stone wall texture, candlelight flicker",
+            "noise": "moderate film grain consistent with low-light shooting"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion", "neon signs"]
+        }
+    },
+    # 5. Mountain trail sunrise
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "Nikon Z8",
+            "lens": "24mm f/2.8",
+            "aspect_ratio": "9:16",
+            "style": "epic mountain landscape, sunrise drama, DSLR quality"
+        },
+        "scene": {
+            "concept": "first-person POV hiking a mountain trail at sunrise with breathtaking valley views",
+            "location": "alpine mountain trail with panoramic valley overlook",
+            "time": "sunrise, first golden light hitting the peaks"
+        },
+        "environment": {
+            "foreground": ["rocky dirt trail with alpine wildflowers at the edges"],
+            "midground": ["two hikers resting on a rocky outcrop ahead looking at the view"],
+            "background": ["misty valley below with layers of mountains fading into the distance", "warm golden sunrise light on the peaks"],
+            "atmosphere": "crisp mountain air, morning mist in the valley, epic scale"
+        },
+        "camera": {
+            "shot_type": "first-person POV looking forward along the trail toward the vista",
+            "aperture": "f/5.6",
+            "depth_of_field": "deep, landscape sharp from mid to background",
+            "perspective": "slightly elevated trail perspective"
+        },
+        "lighting": {
+            "type": "sunrise golden light",
+            "direction": "low angle from the right, raking across the mountains",
+            "quality": "warm dramatic with orange-golden tones",
+            "shadows": "deep valley shadows contrasting with lit peaks"
+        },
+        "colors_and_tone": {
+            "palette": "golden sunrise orange, deep blue shadows, green alpine meadow, misty grey valleys",
+            "contrast": "high dramatic",
+            "saturation": "vibrant but natural sunrise colors"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "rock surface, wildflower petals, distant mountain ridgelines",
+            "noise": "very subtle, clean landscape photography"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "selfie"]
+        }
+    },
+    # 6. Japanese garden
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "Sony A7C II",
+            "lens": "40mm f/2.5",
+            "aspect_ratio": "9:16",
+            "style": "serene zen atmosphere, soft morning light, natural tones"
+        },
+        "scene": {
+            "concept": "first-person POV gentle walk through a traditional Japanese garden",
+            "location": "manicured Japanese zen garden with stone paths and bamboo",
+            "time": "early morning, soft diffused light with subtle mist"
+        },
+        "environment": {
+            "foreground": ["stepping stones on raked white gravel", "manicured moss borders"],
+            "midground": ["arched wooden bridge over koi pond", "elderly couple admiring maple tree"],
+            "background": ["bamboo grove swaying gently", "traditional wooden pagoda partially visible"],
+            "atmosphere": "tranquil, meditative, morning dew on leaves, subtle fog"
+        },
+        "camera": {
+            "shot_type": "first-person POV looking forward along the garden path",
+            "aperture": "f/2.5",
+            "depth_of_field": "shallow, beautiful background separation",
+            "perspective": "natural walking height, slightly contemplative downward angle"
+        },
+        "lighting": {
+            "type": "soft diffused morning light with mist",
+            "direction": "ambient overhead with slight backlight through bamboo",
+            "quality": "ethereal, soft, zen-like",
+            "shadows": "gentle and soft everywhere"
+        },
+        "colors_and_tone": {
+            "palette": "jade green moss, white gravel, dark wood brown, soft pink blossoms, grey stone",
+            "contrast": "low-medium, peaceful",
+            "saturation": "muted and natural, wabi-sabi aesthetic"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "raked gravel patterns, moss texture, wood grain, water reflections",
+            "noise": "very subtle, clean"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "cherry blossom overload"]
+        }
+    },
+    # 7. Riverside sunset
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "Canon R6 II",
+            "lens": "35mm f/1.4",
+            "aspect_ratio": "9:16",
+            "style": "golden reflections, warm evening, natural film aesthetic"
+        },
+        "scene": {
+            "concept": "first-person POV calm walk along a quiet riverside path at sunset",
+            "location": "tree-lined river path with a wide peaceful river",
+            "time": "sunset, warm golden light reflecting off the water"
+        },
+        "environment": {
+            "foreground": ["gravel walking path with tall grass and wildflowers at the edges"],
+            "midground": ["fisherman sitting on the far bank", "wooden dock with a small rowboat"],
+            "background": ["golden sunset reflecting on the river surface", "willow trees draping into the water"],
+            "atmosphere": "peaceful end of day, warm breeze, birdsong"
+        },
+        "camera": {
+            "shot_type": "first-person POV looking forward along the river path",
+            "aperture": "f/2.0",
+            "depth_of_field": "shallow, river and trees beautifully blurred",
+            "perspective": "natural walking eye level"
+        },
+        "lighting": {
+            "type": "warm sunset light",
+            "direction": "low angle from ahead, golden backlight",
+            "quality": "rich warm golden with subtle lens flare",
+            "shadows": "long and warm stretching toward camera"
+        },
+        "colors_and_tone": {
+            "palette": "molten gold water reflections, warm green foliage, soft pink sky, earthy path",
+            "contrast": "medium, warm tones dominant",
+            "saturation": "rich golden but natural"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "water ripple reflections, grass detail, gravel texture",
+            "noise": "subtle warm film grain"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible"]
+        }
+    },
+    # 8. Tropical path
+    {
+        "meta": {
+            "quality": "ultra photorealistic",
+            "resolution": "8k",
+            "camera": "iPhone 15 Pro Max",
+            "lens": "24mm wide",
+            "aspect_ratio": "9:16",
+            "style": "tropical paradise, vivid natural colors, iPhone realism"
+        },
+        "scene": {
+            "concept": "first-person POV walking through a lush tropical jungle path toward the ocean",
+            "location": "tropical island path with palm trees and exotic vegetation",
+            "time": "mid-morning, bright dappled tropical light"
+        },
+        "environment": {
+            "foreground": ["sandy wooden boardwalk path through dense tropical plants"],
+            "midground": ["palm fronds arching over the path", "bright tropical flowers"],
+            "background": ["glimpse of turquoise ocean through the vegetation", "bright blue sky with white clouds"],
+            "atmosphere": "humid tropical air, bright vibrant colors, paradise feeling"
+        },
+        "camera": {
+            "shot_type": "first-person POV walking forward toward the ocean",
+            "aperture": "f/1.8",
+            "depth_of_field": "shallow, tropical plants creating natural frame",
+            "perspective": "natural walking height"
+        },
+        "lighting": {
+            "type": "bright tropical sunlight filtered through canopy",
+            "direction": "overhead with dappled patterns",
+            "quality": "bright and vivid with natural shadows",
+            "shadows": "sharp dappled leaf shadows on the boardwalk"
+        },
+        "colors_and_tone": {
+            "palette": "vivid tropical green, turquoise ocean, white sand, bright flower colors",
+            "contrast": "high, vivid tropical",
+            "saturation": "vibrant but natural tropical vibrancy"
+        },
+        "quality_and_technical_details": {
+            "resolution": "masterpiece, extremely detailed",
+            "texture_focus": "palm bark, tropical leaf veins, wooden boardwalk grain",
+            "noise": "minimal, clean bright photography"
+        },
+        "negative_prompt": {
+            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "tourists"]
+        }
+    },
+]
+
+# Simple text fallback templates (used when Claude is unavailable)
 IMAGE_PROMPT_TEMPLATES = [
     "Photorealistic POV walking through a sun-dappled city park, golden afternoon light filtering through cherry blossom trees, a couple walking their dog in the distance, shallow depth of field, warm tones, cinematic",
     "Hyper-realistic POV stroll along a pristine sandy beach at golden hour, soft warm sunlight with lens flare, a jogger running far ahead on the shoreline, gentle ocean waves, natural film grain",
-    "Photorealistic POV calm walk through vibrant downtown streets at magic hour, beautiful glass skyscraper reflections, pedestrians crossing in the background, soft bokeh city lights, premium cinematic quality",
     "Ultra-realistic POV peaceful walk through a lush forest trail, volumetric light rays through tall pine trees, a hiker with a backpack visible far ahead, rich earthy greens, shallow depth of field",
-    "Photorealistic POV scenic stroll along a mountain trail overlook at sunrise, breathtaking misty valley vista, two friends sitting on rocks in the distance, warm golden light, cinematic lens flare",
-    "Hyper-realistic POV gentle walk through Japanese garden path, soft morning light with subtle fog, an elderly couple admiring koi pond ahead, peaceful zen atmosphere, beautiful bokeh",
     "Photorealistic POV relaxed stroll through autumn woods, golden maple leaves falling, a person walking their golden retriever far ahead on the trail, warm soft backlight, natural film grain",
-    "Ultra-realistic POV calming walk along a quiet riverside path at sunset, soft golden reflections on water, fishermen visible on the far bank, peaceful nature scene, cinematic color grading",
-    "Photorealistic POV morning stroll through lavender fields in Provence, soft purple hues stretching to horizon, a woman in a sundress walking far ahead, warm golden sunlight, shallow depth of field",
-    "Hyper-realistic POV evening walk through a European cobblestone street, warm café lights and street lamps, locals dining at sidewalk tables in the background, charming old town ambiance, premium cinematic quality"
 ]
 
 # Text overlays for videos — Loom-style multi-line format
@@ -76,41 +453,90 @@ CAPTIONS = [
 # Hashtags — teamwork format
 HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamwork1minago #teamwork1hourago"
 
-# Cinematic video motion prompts for Seedance 1.5 Pro
-VIDEO_MOTION_PROMPTS = [
-    "Smooth cinematic forward walking POV motion through the scene, natural gentle camera sway like a leisurely stroll, soft ambient movement with subtle parallax",
-    "Premium cinematic steady forward glide, slow natural walking pace, gentle camera bob creating immersive first-person perspective, professional steadicam feel",
-    "Smooth forward walking POV with cinematic depth, gentle natural breathing motion in camera, soft light rays shifting as perspective moves through the scene",
-    "Ultra-smooth first-person walking motion through the environment, subtle head-turn pan exploring the surroundings, natural human walking rhythm",
-    "Cinematic slow walking forward with gentle sway, soft ambient particles floating, dynamic light shifts as the camera moves through the scene naturally"
+# Varied motion prompts for Hailuo 2.3 — each creates a DIFFERENT video from the same base image
+# Using diverse walking styles, camera movements, and environmental interactions
+HAILUO_MOTION_PROMPTS = [
+    "Slow, steady forward walking POV, gentle rhythmic camera sway, warm sunlight shifting on the ground, peaceful natural pace, immersive first-person perspective",
+    "Medium pace walking forward, subtle handheld camera feel, light breeze moving nearby foliage, natural head-bob motion, birds flying across the sky",
+    "Relaxed contemplative walk forward, smooth cinematic glide, slight left-to-right looking around motion, sun flare gently shifting, ambient dust particles floating",
+    "Brisk morning walk forward through the scene, energetic camera movement, light bouncing dynamically, leaves rustling from the walking breeze",
+    "Ultra-smooth steadicam forward walk, dreamy slow motion feeling, subtle focus pull from foreground to background, golden light dancing",
+    "Natural casual stroll forward, gentle camera tilt looking up at the sky briefly then back forward, clouds slowly drifting, peaceful ambient motion",
+    "Slow meditative walk forward, camera gently drifting right to explore the scenery, soft wind blowing grass and flowers, serene atmosphere",
+    "Steady confident walk forward, dynamic camera with slight zoom-in effect, shadows lengthening, warm light intensifying",
+    "Gentle flowing forward motion, camera with slight S-curve path variation, light filtering through trees shifting patterns, magical atmosphere",
 ]
 
 # =========================================
-# MASTER CLAUDE SYSTEM PROMPT FOR REALISM
+# MASTER CLAUDE SYSTEM PROMPT (JSON OUTPUT)
 # =========================================
 
-CLAUDE_IMAGE_SYSTEM_PROMPT = """You are a world-class cinematographer and prompt engineer specializing in photorealistic AI image generation. Your job is to create prompts that produce STUNNING, indistinguishable-from-real-life images.
+CLAUDE_IMAGE_SYSTEM_PROMPT = """You are a world-class cinematographer specializing in ultra-photorealistic AI image generation using structured JSON prompts for Nano Banana Pro.
 
-CRITICAL REQUIREMENTS FOR EVERY PROMPT:
-1. PHOTOREALISM: Must look like a real photograph, NOT AI-generated. Use terms: "photorealistic", "real photograph", "DSLR quality", "natural film grain"
-2. LIGHTING: Always specify premium lighting — golden hour, volumetric light rays, soft shadows, natural lens flare, warm backlighting
-3. POV PERSPECTIVE: First-person walking POV looking FORWARD at the horizon/scenery. NEVER show feet, legs, or lower body
-4. PEOPLE IN BACKGROUND: Always include 1-3 people naturally placed in the scene — pedestrians walking, joggers, couples, dog walkers, someone sitting on a bench. They should be at MEDIUM TO FAR distance, adding life without being the focus
-5. DEPTH: Shallow depth of field with background bokeh, creating cinematic depth layers
-6. CAMERA QUALITY: Shot on Sony A7IV or Canon R5, 35mm lens, f/2.8, natural color grading, subtle film grain
-7. FORMAT: 9:16 vertical composition optimized for mobile/TikTok
-8. DIVERSITY: Vary locations dramatically — city parks, beaches, forests, downtown streets, mountain trails, Japanese gardens, European villages, riverside paths, lavender fields, tropical paths, desert oases, snowy alpine trails
-9. ATMOSPHERE: Rich, immersive atmosphere — morning mist, evening glow, flower petals, falling leaves, light rain, snow flurries
-10. COLOR: Natural color palette with warm tones, NOT oversaturated. Think Kodak Portra 400 film look
+You MUST output a valid JSON object controlling every aspect of the image. Follow this exact structure:
 
-OUTPUT FORMAT: Just the prompt text, nothing else. Keep it under 300 words. Be specific and vivid."""
+{
+  "meta": {
+    "quality": "ultra photorealistic",
+    "resolution": "8k",
+    "camera": "(real camera model)",
+    "lens": "(focal length and aperture)",
+    "aspect_ratio": "9:16",
+    "style": "(brief style description)"
+  },
+  "scene": {
+    "concept": "first-person POV walking through (specific scene)",
+    "location": "(detailed location)",
+    "time": "(time of day and lighting conditions)"
+  },
+  "environment": {
+    "foreground": ["(path/ground details)"],
+    "midground": ["(people, objects at medium distance)"],
+    "background": ["(distant scenery, sky)"],
+    "atmosphere": "(ambient description)"
+  },
+  "camera": {
+    "shot_type": "first-person POV looking forward",
+    "aperture": "(f-stop)",
+    "depth_of_field": "(description)",
+    "perspective": "natural walking height, eye level"
+  },
+  "lighting": {
+    "type": "(light source)",
+    "direction": "(from where)",
+    "quality": "(warm/cool, soft/hard)",
+    "shadows": "(shadow description)"
+  },
+  "colors_and_tone": {
+    "palette": "(specific colors)",
+    "contrast": "(level)",
+    "saturation": "(level and feel)"
+  },
+  "quality_and_technical_details": {
+    "resolution": "masterpiece, extremely detailed",
+    "texture_focus": "(what textures matter)",
+    "noise": "(film grain description)"
+  },
+  "negative_prompt": {
+    "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion"]
+  }
+}
+
+CRITICAL RULES:
+1. ALWAYS first-person walking POV looking FORWARD. NEVER show feet, legs, or body.
+2. ALWAYS include 1-3 people naturally in midground/background (pedestrians, joggers, couples, dog walkers)
+3. Use REAL camera models (Sony, Canon, Nikon, Fujifilm) and real lens specs
+4. VARY locations: beaches, forests, city parks, mountain trails, Japanese gardens, European streets, riverside paths, tropical paths, lavender fields, snowy trails, desert oases
+5. Make it indistinguishable from a real photograph
+6. Output ONLY the JSON, no explanation"""
 
 
 class VideoGenerator:
     """
     Generates teamwork trend videos using AI.
     
-    Pipeline v3: Claude (master prompt) → Nano Banana Pro 2K (image) → Seedance 1.5 Pro (video) → FFmpeg (overlay + sound)
+    Pipeline v4: JSON prompt → Nano Banana Pro 1K (image) → Hailuo 2.3 Standard 6s 768P (video) → FFmpeg (overlay + sound)
+    Image reuse: 1 base image → 3 videos per account via varied motion prompts.
     """
     
     def __init__(self, output_dir: Optional[str] = None):
@@ -138,7 +564,10 @@ class VideoGenerator:
         # Track used stock clips to avoid reuse across accounts in same batch
         self._used_clips: set = set()
         
-        logger.info(f"VideoGenerator v3 initialized, output: {self.output_dir}")
+        # Track used JSON templates to avoid repeats in same session
+        self._used_json_templates: set = set()
+        
+        logger.info(f"VideoGenerator v4 initialized (Hailuo 2.3 Standard 6s), output: {self.output_dir}")
     
     # ===========================
     # Claude Prompt Generation
@@ -146,64 +575,91 @@ class VideoGenerator:
     
     def generate_image_prompt_with_claude(self, style_hint: Optional[str] = None) -> str:
         """
-        Use Claude to generate a cinematic, photorealistic image prompt.
+        Generate ultra-realistic image prompt using JSON-structured templates or Claude.
+        
+        Uses structured JSON prompts for Nano Banana Pro that control every aspect
+        of the image (camera, lighting, environment, etc.) for maximum photorealism.
         
         Args:
             style_hint: Optional hint like "beach", "forest", "city"
         
         Returns:
-            Master-quality image prompt for Nano Banana Pro 2K
+            JSON-formatted string prompt for Nano Banana Pro
         """
-        if not self.claude_api_key:
-            # Fallback to template if no Claude API
-            template = random.choice(IMAGE_PROMPT_TEMPLATES)
-            if style_hint:
-                template = template.replace("city park", style_hint)
-            return template
+        # First try Claude for unique JSON prompts
+        if self.claude_api_key:
+            try:
+                import httpx
+                
+                user_message = "Generate a unique, ultra-photorealistic first-person POV walking scene as a JSON object. Make it feel like a real moment captured on a premium camera."
+                if style_hint:
+                    user_message += f" Location theme: {style_hint}"
+                user_message += " Include 1-3 people naturally in the background. Output ONLY the JSON."
+                
+                response = httpx.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-api-key": self.claude_api_key,
+                        "anthropic-version": "2023-06-01"
+                    },
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 800,
+                        "system": CLAUDE_IMAGE_SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": user_message}]
+                    },
+                    timeout=30
+                )
+                response.raise_for_status()
+                
+                result = response.json()
+                prompt = result.get("content", [{}])[0].get("text", "").strip()
+                
+                # Validate it's valid JSON
+                try:
+                    json.loads(prompt)
+                    logger.info(f"Claude generated JSON prompt: {prompt[:120]}...")
+                    return prompt
+                except json.JSONDecodeError:
+                    logger.warning("Claude output was not valid JSON, falling back to template")
+                    
+            except Exception as e:
+                logger.warning(f"Claude prompt generation failed: {e}, using JSON template")
         
-        try:
-            import httpx
-            
-            user_message = "Generate a unique, ultra-photorealistic POV scene prompt for a peaceful walking video. The scene should feel like a real moment captured on a premium camera."
-            if style_hint:
-                user_message += f" Location theme: {style_hint}"
-            user_message += " Remember: include people in the background for realism."
-            
-            # Debug: log key presence (not the actual key)
-            key_preview = self.claude_api_key[:15] + "..." if self.claude_api_key else "None"
-            logger.debug(f"Using Claude API key: {key_preview}")
-            
-            response = httpx.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": self.claude_api_key,
-                    "anthropic-version": "2023-06-01"
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 400,
-                    "system": CLAUDE_IMAGE_SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": user_message}]
-                },
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            prompt = result.get("content", [{}])[0].get("text", "").strip()
-            
-            logger.info(f"Claude generated master prompt: {prompt[:100]}...")
-            return prompt
-            
-        except Exception as e:
-            logger.warning(f"Claude prompt generation failed: {e}, using template")
-            template = random.choice(IMAGE_PROMPT_TEMPLATES)
-            return template
+        # Fallback: use pre-built JSON templates
+        # Pick a template we haven't used recently
+        available = [i for i in range(len(JSON_PROMPT_TEMPLATES)) if i not in self._used_json_templates]
+        if not available:
+            self._used_json_templates.clear()
+            available = list(range(len(JSON_PROMPT_TEMPLATES)))
+        
+        # Filter by style hint if provided
+        if style_hint:
+            style_lower = style_hint.lower()
+            style_map = {
+                "beach": 0, "forest": 1, "park": 2, "autumn": 2, "city": 2,
+                "europe": 3, "cobblestone": 3, "mountain": 4, "japanese": 5,
+                "japan": 5, "river": 6, "tropical": 7, "jungle": 7
+            }
+            for key, idx in style_map.items():
+                if key in style_lower and idx in available:
+                    template_idx = idx
+                    break
+            else:
+                template_idx = random.choice(available)
+        else:
+            template_idx = random.choice(available)
+        
+        self._used_json_templates.add(template_idx)
+        template = JSON_PROMPT_TEMPLATES[template_idx]
+        prompt_str = json.dumps(template)
+        logger.info(f"Using JSON template #{template_idx + 1}: {template['scene']['concept'][:80]}...")
+        return prompt_str
     
     def generate_video_motion_prompt(self) -> str:
-        """Generate cinematic motion prompt for Seedance 1.5 Pro."""
-        return random.choice(VIDEO_MOTION_PROMPTS)
+        """Get a random Hailuo 2.3 motion prompt for varied video output."""
+        return random.choice(HAILUO_MOTION_PROMPTS)
     
     # ===========================
     # FFmpeg Processing
@@ -1182,110 +1638,113 @@ class VideoGenerator:
             )
     
     # ===========================
-    # Main Video Pipeline v3 (AI - costs ~$0.20/video)
+    # Main Video Pipeline v4 (AI — costs ~$0.15-0.24/video)
     # ===========================
     
     def generate_teamwork_video(
         self,
         style_hint: Optional[str] = None,
         text_overlay: Optional[str] = None,
-        skip_overlay: bool = False
+        skip_overlay: bool = False,
+        image_url: Optional[str] = None
     ) -> GeneratedVideo:
         """
         Generate a complete teamwork trend video.
         
-        Pipeline v3:
-        1. Claude generates cinematic image prompt (master-level realism)
-        2. Nano Banana Pro 2K creates 9:16 image
-        3. Seedance 1.5 Pro converts to 720p 8s video (no audio)
-        4. FFmpeg adds text overlay
-        5. FFmpeg adds random trending sound
-        6. FFmpeg strips metadata
+        Pipeline v4:
+        1. JSON-structured prompt → Nano Banana Pro 1K creates ultra-realistic image
+        2. Hailuo 2.3 Standard converts to 6s 768P video
+        3. FFmpeg adds text overlay
+        4. FFmpeg adds random trending sound
+        5. FFmpeg strips metadata
         
         Args:
             style_hint: Location style hint (beach, forest, city, etc.)
             text_overlay: Custom text, or random from list
             skip_overlay: Skip FFmpeg overlay step
+            image_url: Pre-generated image URL (for image reuse across multiple videos)
         
         Returns:
             GeneratedVideo with paths and URLs
         """
         cost = 0.0
+        image_prompt = None
         
-        # 1. Generate image prompt with Claude (master-level realism)
-        logger.info("Step 1: Generating cinematic image prompt...")
-        image_prompt = self.generate_image_prompt_with_claude(style_hint)
-        
-        # 2. Generate image with Nano Banana Pro 2K
-        logger.info("Step 2: Generating 2K image with Nano Banana Pro...")
-        image_result = self.kie.generate_image(
-            prompt=image_prompt,
-            aspect_ratio="9:16",
-            resolution="2K",  # Upgraded from 1K
-            output_format="png"
-        )
-        
-        if not image_result.success:
-            return GeneratedVideo(
-                success=False,
-                error=f"Image generation failed: {image_result.error}",
-                prompt_used=image_prompt
+        # 1. Generate or reuse image
+        if image_url:
+            # Reuse existing image (no extra cost)
+            logger.info(f"Step 1: Reusing existing image: {image_url[:80]}...")
+        else:
+            # Generate new image with JSON prompt
+            logger.info("Step 1: Generating JSON image prompt...")
+            image_prompt = self.generate_image_prompt_with_claude(style_hint)
+            
+            logger.info("Step 2: Generating 1K image with Nano Banana Pro...")
+            image_result = self.kie.generate_image(
+                prompt=image_prompt,
+                aspect_ratio="9:16",
+                resolution="1K",
+                output_format="png"
             )
+            
+            if not image_result.success:
+                return GeneratedVideo(
+                    success=False,
+                    error=f"Image generation failed: {image_result.error}",
+                    prompt_used=image_prompt
+                )
+            
+            # Wait for image
+            logger.info(f"Waiting for image task {image_result.task_id}...")
+            image_final = self.kie.wait_for_task(image_result.task_id, timeout_seconds=180)
+            
+            if not image_final.success or not image_final.result_urls:
+                return GeneratedVideo(
+                    success=False,
+                    error=f"Image generation failed: {image_final.error or 'No result URLs'}",
+                    prompt_used=image_prompt
+                )
+            
+            image_url = image_final.result_urls[0]
+            cost += 0.09  # Nano Banana Pro 1K cost
+            logger.info(f"1K Image generated: {image_url}")
         
-        # Wait for image
-        logger.info(f"Waiting for image task {image_result.task_id}...")
-        image_final = self.kie.wait_for_task(image_result.task_id, timeout_seconds=180)
-        
-        if not image_final.success or not image_final.result_urls:
-            return GeneratedVideo(
-                success=False,
-                error=f"Image generation failed: {image_final.error or 'No result URLs'}",
-                prompt_used=image_prompt
-            )
-        
-        image_url = image_final.result_urls[0]
-        cost += 0.12  # Nano Banana Pro 2K cost
-        logger.info(f"2K Image generated: {image_url}")
-        
-        # 3. Convert to video with Seedance 1.5 Pro (720p, 8s, no audio)
-        logger.info("Step 3: Converting to cinema-quality video with Seedance 1.5 Pro...")
+        # 2. Convert to video with Hailuo 2.3 Standard (6s, 768P)
+        logger.info("Step 3: Converting to video with Hailuo 2.3 Standard 6s 768P...")
         video_prompt = self.generate_video_motion_prompt()
         
-        video_result = self.kie.image_to_video_seedance(
+        video_result = self.kie.image_to_video_hailuo(
             image_url=image_url,
             prompt=video_prompt,
-            aspect_ratio="9:16",
-            resolution="720p",
-            duration="8",
-            fixed_lens=False,       # Dynamic camera movement
-            generate_audio=False    # No AI audio, we add trending sound later
+            duration="6",
+            resolution="768P"
         )
         
         if not video_result.success:
             return GeneratedVideo(
                 success=False,
-                error=f"Seedance video failed: {video_result.error}",
+                error=f"Hailuo video failed: {video_result.error}",
                 image_url=image_url,
                 prompt_used=image_prompt,
                 cost_usd=cost
             )
         
-        # Wait for video (Seedance can take longer)
-        logger.info(f"Waiting for Seedance video task {video_result.task_id}...")
+        # Wait for video
+        logger.info(f"Waiting for Hailuo video task {video_result.task_id}...")
         video_final = self.kie.wait_for_task(video_result.task_id, timeout_seconds=600)
         
         if not video_final.success or not video_final.result_urls:
             return GeneratedVideo(
                 success=False,
-                error=f"Seedance video failed: {video_final.error or 'No result URLs'}",
+                error=f"Hailuo video failed: {video_final.error or 'No result URLs'}",
                 image_url=image_url,
                 prompt_used=image_prompt,
                 cost_usd=cost
             )
         
         video_url = video_final.result_urls[0]
-        cost += 0.14  # Seedance 720p/8s no-audio cost
-        logger.info(f"Cinema video generated: {video_url}")
+        cost += 0.15  # Hailuo 2.3 Standard 6s 768P cost
+        logger.info(f"Hailuo video generated: {video_url}")
         
         # 4. Download video
         video_filename = f"teamwork_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
@@ -1372,7 +1831,7 @@ class VideoGenerator:
             image_url=image_url,
             video_url=video_url,
             prompt_used=image_prompt,
-            text_overlay=final_text if not skip_overlay else None,
+            text_overlay=final_text_line if not skip_overlay else None,
             cost_usd=cost
         )
     
@@ -1413,6 +1872,86 @@ class VideoGenerator:
             # Small delay between generations
             if i < count - 1:
                 time.sleep(2)
+        
+        return results
+    
+    def generate_batch_for_account(
+        self,
+        count: int = 3,
+        style_hint: Optional[str] = None,
+        text_overlay: Optional[str] = None,
+        skip_overlay: bool = False
+    ) -> List[GeneratedVideo]:
+        """
+        Generate multiple AI videos for one account, reusing a single base image.
+        
+        Cost optimization: generates 1 image ($0.09) then creates 'count' videos
+        from it with varied Hailuo 2.3 motion prompts ($0.15 each).
+        
+        3 videos: $0.09 + (3 × $0.15) = $0.54 total ($0.18 avg per video)
+        vs old: 3 × $0.26 = $0.78 total ($0.26 avg per video) → 31% savings
+        
+        Args:
+            count: Number of videos (default 3 per account)
+            style_hint: Location theme for the base image
+            text_overlay: Custom text overlay (or random)
+            skip_overlay: Skip text overlay step
+        
+        Returns:
+            List of GeneratedVideo results
+        """
+        results = []
+        
+        # Step 1: Generate ONE base image
+        logger.info(f"=== Batch for account: generating 1 image + {count} videos ===")
+        logger.info("Batch Step 1: Generating base image...")
+        
+        image_prompt = self.generate_image_prompt_with_claude(style_hint)
+        
+        image_result = self.kie.generate_image(
+            prompt=image_prompt,
+            aspect_ratio="9:16",
+            resolution="1K",
+            output_format="png"
+        )
+        
+        if not image_result.success:
+            logger.error(f"Base image generation failed: {image_result.error}")
+            return [GeneratedVideo(success=False, error=f"Base image failed: {image_result.error}")] * count
+        
+        image_final = self.kie.wait_for_task(image_result.task_id, timeout_seconds=180)
+        
+        if not image_final.success or not image_final.result_urls:
+            logger.error(f"Base image failed: {image_final.error or 'No URLs'}")
+            return [GeneratedVideo(success=False, error=f"Base image failed: {image_final.error}")] * count
+        
+        base_image_url = image_final.result_urls[0]
+        logger.info(f"Base image ready: {base_image_url[:80]}...")
+        
+        # Step 2: Generate 'count' videos from the SAME image with different motion prompts
+        for i in range(count):
+            logger.info(f"Batch video {i+1}/{count}: creating from base image with unique motion...")
+            
+            result = self.generate_teamwork_video(
+                style_hint=style_hint,
+                text_overlay=text_overlay,
+                skip_overlay=skip_overlay,
+                image_url=base_image_url  # Reuse the same image!
+            )
+            results.append(result)
+            
+            if result.success:
+                logger.info(f"Batch video {i+1} success: {result.video_path} (${result.cost_usd:.2f})")
+            else:
+                logger.error(f"Batch video {i+1} failed: {result.error}")
+            
+            # Small delay between video generations
+            if i < count - 1:
+                time.sleep(3)
+        
+        total_cost = 0.09 + sum(r.cost_usd for r in results)  # Add image cost
+        success_count = sum(1 for r in results if r.success)
+        logger.info(f"=== Batch complete: {success_count}/{count} videos, total cost: ${total_cost:.2f} ===")
         
         return results
     
