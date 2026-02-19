@@ -1219,16 +1219,18 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
     try:
         with _video_jobs_lock:
             _video_jobs[job_id]["status"] = "running"
-            _video_jobs[job_id]["message"] = f"Generating {count} video(s) from stock footage..."
+            _video_jobs[job_id]["message"] = f"Generating {count} AI video(s) with Hailuo 2.3..."
         
-        logger.info(f"[Job {job_id}] Starting stock footage generation of {count} video(s)")
+        logger.info(f"[Job {job_id}] Starting AI video generation of {count} video(s)")
         generator = get_video_generator()
         
         results = []
         for i in range(count):
-            logger.info(f"[Job {job_id}] Generating video {i+1}/{count} from stock footage...")
-            result = generator.generate_stock_video(
-                text_overlay=text_overlay if text_overlay else None
+            logger.info(f"[Job {job_id}] Generating AI video {i+1}/{count}...")
+            result = generator.generate_teamwork_video(
+                style_hint=style if style else None,
+                text_overlay=text_overlay if text_overlay else None,
+                skip_overlay=skip_overlay
             )
             results.append(result)
         

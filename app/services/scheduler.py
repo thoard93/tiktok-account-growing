@@ -435,36 +435,33 @@ class AutomationScheduler:
                                             "cap": VIDEO_LIBRARY_CAP})
                 return
             
-            # Generate up to the cap, stopping when clips run out
+            # AI pipeline: generate 3 videos per account using image reuse
             room_left = VIDEO_LIBRARY_CAP - existing_count
-            max_videos = min(room_left, max(min_needed, 30))
-            logger.info(f"Video library: {existing_count}/{VIDEO_LIBRARY_CAP} — generating up to {max_videos} more")
+            videos_per_account = posts_per  # Usually 3
+            max_accounts = min(len(accounts), room_left // max(videos_per_account, 1))
+            
+            logger.info(f"Video library: {existing_count}/{VIDEO_LIBRARY_CAP} — "
+                         f"generating {videos_per_account} AI videos for up to {max_accounts} accounts")
             
             results = []
-            consecutive_fails = 0
             
-            for i in range(max_videos):
+            for i, account in enumerate(accounts[:max_accounts]):
                 try:
-                    result = generator.generate_stock_video()
-                    results.append(result)
-                    if result.success:
-                        logger.info(f"  Video {i+1}: ✓ {result.video_path}")
-                        consecutive_fails = 0
-                    else:
-                        logger.warning(f"  Video {i+1}: ✗ {result.error}")
-                        consecutive_fails += 1
-                        # Stop generating if we've hit 3 consecutive failures
-                        # (means we're out of scene clips)
-                        if consecutive_fails >= 3:
-                            logger.info(f"  Stopping: {consecutive_fails} consecutive failures (out of clips)")
-                            break
+                    account_name = account.get("tiktok_username", f"account_{i+1}")
+                    logger.info(f"Generating AI batch for {account_name} ({i+1}/{max_accounts})...")
+                    
+                    batch_results = generator.generate_batch_for_account(
+                        count=videos_per_account
+                    )
+                    results.extend(batch_results)
+                    
+                    success_count = sum(1 for r in batch_results if r.success)
+                    logger.info(f"  {account_name}: {success_count}/{videos_per_account} videos generated")
+                    
                 except Exception as e:
-                    logger.error(f"  Video {i+1}: ✗ {e}")
+                    logger.error(f"  Account {i+1} batch failed: {e}")
                     from app.services.video_generator import GeneratedVideo
-                    results.append(GeneratedVideo(success=False, error=str(e)))
-                    consecutive_fails += 1
-                    if consecutive_fails >= 3:
-                        break
+                    results.extend([GeneratedVideo(success=False, error=str(e))] * videos_per_account)
             
             successful = [r for r in results if r.success]
             failed = [r for r in results if not r.success]
@@ -476,7 +473,7 @@ class AutomationScheduler:
                                    "videos_generated": len(successful),
                                    "videos_failed": len(failed),
                                    "cost_usd": round(total_cost, 2),
-                                   "source": "youtube_scene_clips",
+                                   "source": "ai_hailuo_2.3",
                                },
                                duration=duration)
             
