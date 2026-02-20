@@ -447,7 +447,7 @@ class AutomationScheduler:
             
             for i, account in enumerate(accounts[:max_accounts]):
                 try:
-                    account_name = account.get("tiktok_username", f"account_{i+1}")
+                    account_name = getattr(account, "tiktok_username", f"account_{i+1}")
                     logger.info(f"Generating AI batch for {account_name} ({i+1}/{max_accounts})...")
                     
                     batch_results = generator.generate_batch_for_account(
