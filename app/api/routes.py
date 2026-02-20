@@ -1224,15 +1224,29 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
         logger.info(f"[Job {job_id}] Starting AI video generation of {count} video(s)")
         generator = get_video_generator()
         
+        import concurrent.futures
         results = []
-        for i in range(count):
-            logger.info(f"[Job {job_id}] Generating AI video {i+1}/{count}...")
-            result = generator.generate_teamwork_video(
-                style_hint=style if style else None,
-                text_overlay=text_overlay if text_overlay else None,
-                skip_overlay=skip_overlay
-            )
-            results.append(result)
+        
+        def _generate_single(i):
+            logger.info(f"[Job {job_id}] Thread {i+1}/{count}: Generating AI video...")
+            # Slight stagger
+            import time
+            time.sleep(i * 1.5)
+            try:
+                return generator.generate_teamwork_video(
+                    style_hint=style if style else None,
+                    text_overlay=text_overlay if text_overlay else None,
+                    skip_overlay=skip_overlay
+                )
+            except Exception as e:
+                logger.error(f"[Job {job_id}] Thread {i+1} crashed: {e}")
+                from app.services.video_generator import GeneratedVideo
+                return GeneratedVideo(success=False, error=str(e))
+                
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(count, 5)) as executor:
+            futures = [executor.submit(_generate_single, i) for i in range(count)]
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
         
         # Log results summary
         success_count = sum(1 for r in results if r.success)

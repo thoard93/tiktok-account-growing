@@ -1886,10 +1886,7 @@ class VideoGenerator:
         Generate multiple AI videos for one account, reusing a single base image.
         
         Cost optimization: generates 1 image ($0.09) then creates 'count' videos
-        from it with varied Hailuo 2.3 motion prompts ($0.15 each).
-        
-        3 videos: $0.09 + (3 × $0.15) = $0.54 total ($0.18 avg per video)
-        vs old: 3 × $0.26 = $0.78 total ($0.26 avg per video) → 31% savings
+        from it concurrently with varied Hailuo 2.3 motion prompts ($0.15 each).
         
         Args:
             count: Number of videos (default 3 per account)
@@ -1900,6 +1897,7 @@ class VideoGenerator:
         Returns:
             List of GeneratedVideo results
         """
+        import concurrent.futures
         results = []
         
         # Step 1: Generate ONE base image
@@ -1928,26 +1926,36 @@ class VideoGenerator:
         base_image_url = image_final.result_urls[0]
         logger.info(f"Base image ready: {base_image_url[:80]}...")
         
-        # Step 2: Generate 'count' videos from the SAME image with different motion prompts
-        for i in range(count):
-            logger.info(f"Batch video {i+1}/{count}: creating from base image with unique motion...")
-            
-            result = self.generate_teamwork_video(
-                style_hint=style_hint,
-                text_overlay=text_overlay,
-                skip_overlay=skip_overlay,
-                image_url=base_image_url  # Reuse the same image!
-            )
-            results.append(result)
-            
-            if result.success:
-                logger.info(f"Batch video {i+1} success: {result.video_path} (${result.cost_usd:.2f})")
-            else:
-                logger.error(f"Batch video {i+1} failed: {result.error}")
-            
-            # Small delay between video generations
-            if i < count - 1:
-                time.sleep(3)
+        # Step 2: Generate 'count' videos CONCURRENTLY from the SAME image
+        logger.info(f"Batch Step 2: Submitting {count} video generation tasks concurrently...")
+        
+        def _generate_single_video(i):
+            logger.info(f"Batch thread {i+1}/{count}: Starting video generation...")
+            try:
+                # Add slight stagger to avoid rate limiting on submission
+                time.sleep(i * 1.5)
+                res = self.generate_teamwork_video(
+                    style_hint=style_hint,
+                    text_overlay=text_overlay,
+                    skip_overlay=skip_overlay,
+                    image_url=base_image_url
+                )
+                if res.success:
+                    logger.info(f"Batch thread {i+1}: Success - {res.video_path}")
+                else:
+                    logger.error(f"Batch thread {i+1}: Failed - {res.error}")
+                return res
+            except Exception as e:
+                logger.error(f"Batch thread {i+1} crashed: {e}")
+                return GeneratedVideo(success=False, error=str(e))
+        
+        # Run video generations in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=count) as executor:
+            # Submit all tasks
+            futures = [executor.submit(_generate_single_video, i) for i in range(count)]
+            # Wait for all to complete
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
         
         total_cost = 0.09 + sum(r.cost_usd for r in results)  # Add image cost
         success_count = sum(1 for r in results if r.success)
