@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from loguru import logger
 
 from app.models.account import Account, Proxy, AccountStatus, ActivityLog
-from app.services.geelark_client import GeeLarkClient
+# Phone client is injected via constructor (GeeLark or MultiLogin)
 from app.config import get_settings
 
 settings = get_settings()
@@ -20,12 +20,12 @@ settings = get_settings()
 
 class AccountManager:
     """
-    Manages TikTok account lifecycle through GeeLark cloud phones.
+    Manages TikTok account lifecycle through cloud phones.
     """
     
-    def __init__(self, db: Session, geelark_client: GeeLarkClient):
+    def __init__(self, db: Session, phone_client):
         self.db = db
-        self.geelark = geelark_client
+        self.phone_client = phone_client
     
     # ===========================
     # Proxy Management
@@ -103,7 +103,7 @@ class AccountManager:
         # Create GeeLark profile
         proxy_config = proxy.to_geelark_format() if proxy else None
         
-        response = self.geelark.create_phone(
+        response = self.phone_client.create_phone(
             name=name,
             proxy_config=proxy_config,
             os_version="12",
@@ -190,7 +190,7 @@ class AccountManager:
         if not account or not account.geelark_profile_id:
             return False
         
-        response = self.geelark.start_phone(account.geelark_profile_id)
+        response = self.phone_client.start_phone(account.geelark_profile_id)
         
         if response.success:
             self._log_activity(account_id, "phone_started", {"profile_id": account.geelark_profile_id})
@@ -205,7 +205,7 @@ class AccountManager:
         if not account or not account.geelark_profile_id:
             return False
         
-        response = self.geelark.stop_phone(account.geelark_profile_id)
+        response = self.phone_client.stop_phone(account.geelark_profile_id)
         
         if response.success:
             self._log_activity(account_id, "phone_stopped", {"profile_id": account.geelark_profile_id})
@@ -269,13 +269,13 @@ class AccountManager:
             return False
         
         if use_marketplace:
-            response = self.geelark.install_app(
+            response = self.phone_client.install_app(
                 phone_id=account.geelark_profile_id,
                 app_name="TikTok"
             )
         else:
             # Custom APK - could add APK URL support here
-            response = self.geelark.install_app(
+            response = self.phone_client.install_app(
                 phone_id=account.geelark_profile_id,
                 app_name="TikTok"
             )
@@ -329,7 +329,7 @@ class AccountManager:
         if not account or not account.geelark_profile_id:
             return False
         
-        response = self.geelark.get_phone_detail(account.geelark_profile_id)
+        response = self.phone_client.get_phone_detail(account.geelark_profile_id)
         if response.success and response.data:
             # Update any available metrics
             account.updated_at = datetime.utcnow()
@@ -429,7 +429,7 @@ class AccountManager:
             update_status("Creating Android 15 cloud phone")
             phone_name = f"TikTok_{name_prefix}_{datetime.now().strftime('%m%d_%H%M')}"
             
-            response = self.geelark.create_single_phone(
+            response = self.phone_client.create_single_phone(
                 name=phone_name,
                 proxy_string=proxy_string,
                 mobile_type="Android 15",  # Latest Android
@@ -439,7 +439,7 @@ class AccountManager:
             
             if not response.success:
                 # Fallback to Android 12 if 15 not available
-                response = self.geelark.create_single_phone(
+                response = self.phone_client.create_single_phone(
                     name=phone_name,
                     proxy_string=proxy_string,
                     mobile_type="Android 12",
@@ -476,7 +476,7 @@ class AccountManager:
             
             # Step 3: Start the phone
             update_status("Starting cloud phone")
-            start_response = self.geelark.start_phones([phone_id])
+            start_response = self.phone_client.start_phones([phone_id])
             logger.info(f"Start phone response: success={start_response.success}, message={start_response.message}")
             if not start_response.success:
                 raise Exception(f"Failed to start phone: {start_response.message}")
@@ -493,7 +493,7 @@ class AccountManager:
                 waited += poll_interval
                 update_status(f"Waiting for phone to boot ({waited}s)")
                 
-                status_response = self.geelark.get_phone_status([phone_id])
+                status_response = self.phone_client.get_phone_status([phone_id])
                 logger.info(f"Phone status poll: success={status_response.success}, data={status_response.data}")
                 
                 if status_response.success and status_response.data:
@@ -530,7 +530,7 @@ class AccountManager:
             
             # Step 4: Install TikTok
             update_status("Installing TikTok")
-            install_response = self.geelark.install_tiktok(phone_id)
+            install_response = self.phone_client.install_tiktok(phone_id)
             if not install_response.success:
                 raise Exception(f"Failed to install TikTok: {install_response.message}")
             
@@ -606,7 +606,7 @@ class AccountManager:
                             update_status(f"Running registration flow with {sms_number.phone_number}")
                             
                             # Run the custom Canvas RPA flow
-                            reg_response = self.geelark.run_custom_rpa(
+                            reg_response = self.phone_client.run_custom_rpa(
                                 phone_id=phone_id,
                                 flow_id=register_flow_id,
                                 variables={
@@ -754,7 +754,7 @@ class AccountManager:
             
             # Step 8: Start warmup
             update_status("Starting warmup process")
-            warmup_response = self.geelark.run_tiktok_warmup(
+            warmup_response = self.phone_client.run_tiktok_warmup(
                 phone_ids=[phone_id],
                 duration_minutes=20
             )

@@ -1,7 +1,7 @@
 """
 API Routes
 ==========
-FastAPI endpoints for account management, automation, and GeeLark integration.
+FastAPI endpoints for account management, automation, and cloud phone integration.
 """
 
 import os
@@ -16,7 +16,7 @@ from loguru import logger
 from app.database import get_db
 from app.config import get_settings
 from app.models.account import Account, Proxy, Video, ActivityLog, AccountStatus, ScheduleConfig, PipelineLog
-from app.services.geelark_client import GeeLarkClient
+from app.services.phone_provider import get_phone_client
 from app.services.account_manager import AccountManager
 from app.services.warmup_service import WarmupService
 from app.services.posting_service import PostingService
@@ -29,7 +29,7 @@ from app.api.schemas import (
     HealthResponse, DashboardStats,
     PhoneCreateRequest, PhoneStartRequest,
     TaskQueryRequest, TaskCancelRequest, TaskRetryRequest,
-    GeeLarkTaskResponse, GeeLarkTaskListResponse,
+    GeeLarkTaskResponse, GeeLarkTaskListResponse,  # Schema names kept for compat
     FullSetupRequest, FullSetupResponse, CredentialResponse
 )
 
@@ -41,44 +41,27 @@ settings = get_settings()
 # Dependencies
 # ===========================
 
-def get_geelark_client() -> GeeLarkClient:
-    """Get configured GeeLark client."""
-    creds = settings.get_geelark_credentials()
-    
-    if creds["method"] == "TOKEN":
-        return GeeLarkClient(
-            base_url=settings.geelark_api_base_url,
-            auth_method="TOKEN",
-            app_token=creds["token"]
-        )
-    else:
-        return GeeLarkClient(
-            base_url=settings.geelark_api_base_url,
-            auth_method="KEY",
-            app_id=creds["app_id"],
-            api_key=creds["api_key"]
-        )
+def get_configured_phone_client():
+    """Get configured phone client (GeeLark or MultiLogin)."""
+    return get_phone_client()
 
 
 def get_account_manager(
     db: Session = Depends(get_db),
-    geelark: GeeLarkClient = Depends(get_geelark_client)
 ) -> AccountManager:
-    return AccountManager(db, geelark)
+    return AccountManager(db, get_phone_client())
 
 
 def get_warmup_service(
     db: Session = Depends(get_db),
-    geelark: GeeLarkClient = Depends(get_geelark_client)
 ) -> WarmupService:
-    return WarmupService(db, geelark)
+    return WarmupService(db, get_phone_client())
 
 
 def get_posting_service(
     db: Session = Depends(get_db),
-    geelark: GeeLarkClient = Depends(get_geelark_client)
 ) -> PostingService:
-    return PostingService(db, geelark)
+    return PostingService(db, get_phone_client())
 
 
 # ===========================
@@ -88,11 +71,16 @@ def get_posting_service(
 @router.get("/health", response_model=HealthResponse, tags=["Status"])
 async def health_check(
     db: Session = Depends(get_db),
-    geelark: GeeLarkClient = Depends(get_geelark_client)
 ):
     """Check system health and connectivity."""
-    # Test GeeLark connection
-    geelark_ok = geelark.test_connection()
+    # Test phone provider connection
+    phone_client = get_phone_client()
+    try:
+        phone_ok = phone_client.test_connection() if hasattr(phone_client, 'test_connection') else True
+        if hasattr(phone_ok, 'success'):
+            phone_ok = phone_ok.success
+    except Exception:
+        phone_ok = False
     
     # Get account counts
     total = db.query(Account).count()
@@ -100,8 +88,8 @@ async def health_check(
     active = db.query(Account).filter(Account.status == AccountStatus.ACTIVE).count()
     
     return HealthResponse(
-        status="healthy" if geelark_ok else "degraded",
-        geelark_connected=geelark_ok,
+        status="healthy" if phone_ok else "degraded",
+        geelark_connected=phone_ok,  # Field name kept for compat
         database_connected=True,
         accounts_total=total,
         accounts_warming=warming,
@@ -479,14 +467,14 @@ def run_magic_setup_background(
     from app.services.account_manager import AccountManager
     from app.database import SessionLocal
     
-    # Create fresh database session and reuse the get_geelark_client helper
+    # Create fresh database session and phone client
     db = SessionLocal()
-    geelark = get_geelark_client()  # Use the properly configured client
+    phone_client = get_phone_client()
     
     try:
         update_task(task_id, status=TaskStatus.RUNNING, progress=5, current_step="Initializing...")
         
-        manager = AccountManager(db, geelark)
+        manager = AccountManager(db, phone_client)
         
         def status_callback(step: str, progress: int):
             update_task(task_id, progress=progress, current_step=step, step_complete=step)
@@ -591,10 +579,10 @@ def _run_batch_setup(batch_id: str, proxies: list, name_prefix: str, max_retries
             _batch_setup_jobs[batch_id]["message"] = f"Processing proxy {i+1}/{len(proxies)}: {proxy_label}"
 
         db = SessionLocal()
-        geelark = get_geelark_client()
+        phone_client = get_phone_client()
 
         try:
-            manager = AccountManager(db, geelark)
+            manager = AccountManager(db, phone_client)
 
             result = manager.full_automation_setup(
                 proxy_string=proxy_string,
@@ -949,17 +937,17 @@ async def get_activity_logs(
 
 
 # ===========================
-# GeeLark Direct API
+# Cloud Phone Direct API (GeeLark legacy routes)
 # ===========================
 
 @router.get("/geelark/phones", tags=["GeeLark"])
 async def list_geelark_phones(
-    geelark: GeeLarkClient = Depends(get_geelark_client),
+    phone_client = get_phone_client(),
     page: int = 1,
     page_size: int = 100  # Increased to get all phones at once (max 100)
 ):
     """List cloud phones directly from GeeLark."""
-    response = geelark.list_phones(page=page, page_size=page_size)
+    response = phone_client.list_phones(page=page, page_size=page_size)
     if response.success:
         return response.data
     raise HTTPException(status_code=500, detail=response.message)
@@ -968,10 +956,10 @@ async def list_geelark_phones(
 @router.post("/geelark/phones/create", tags=["GeeLark"])
 async def create_geelark_phone(
     data: PhoneCreateRequest,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """Create a cloud phone directly via GeeLark."""
-    response = geelark.create_single_phone(
+    response = phone_client.create_single_phone(
         name=data.name,
         proxy_string=data.proxy_string,
         mobile_type=data.mobile_type,
@@ -988,10 +976,10 @@ async def create_geelark_phone(
 @router.post("/geelark/phones/start", tags=["GeeLark"])
 async def start_geelark_phones(
     data: PhoneStartRequest,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """Start cloud phones via GeeLark."""
-    response = geelark.start_phones(
+    response = phone_client.start_phones(
         ids=data.ids,
         width=data.width,
         energy_saving_mode=data.energy_saving_mode
@@ -1004,10 +992,10 @@ async def start_geelark_phones(
 @router.post("/geelark/phones/stop", tags=["GeeLark"])
 async def stop_geelark_phones(
     ids: List[str],
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """Stop cloud phones via GeeLark."""
-    response = geelark.stop_phones(ids)
+    response = phone_client.stop_phones(ids)
     if response.success:
         return response.data
     raise HTTPException(status_code=500, detail=response.message)
@@ -1016,19 +1004,19 @@ async def stop_geelark_phones(
 @router.post("/geelark/tasks/query", tags=["GeeLark"])
 async def query_geelark_tasks(
     data: TaskQueryRequest,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """Query task status from GeeLark. If task_ids provided, queries specific tasks. Otherwise returns task history."""
     # If specific task IDs provided, query those
     if data.task_ids:
-        response = geelark.query_tasks(data.task_ids)
+        response = phone_client.query_tasks(data.task_ids)
         if response.success:
             return {"items": response.data if isinstance(response.data, list) else [], "total": len(response.data or [])}
         raise HTTPException(status_code=500, detail=response.message)
     
     # Otherwise, get task history (last 7 days)
     history_data = {"size": data.page_size}
-    response = geelark._make_request("/task/historyRecords", history_data)
+    response = phone_client._make_request("/task/historyRecords", history_data)
     
     if response.success:
         items = response.data.get("list", []) if response.data else []
@@ -1050,10 +1038,10 @@ async def query_geelark_tasks(
 @router.post("/geelark/tasks/cancel", tags=["GeeLark"])
 async def cancel_geelark_tasks(
     data: TaskCancelRequest,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """Cancel waiting/in-progress tasks."""
-    response = geelark._make_request("/task/cancel", {"ids": data.task_ids})
+    response = phone_client._make_request("/task/cancel", {"ids": data.task_ids})
     if response.success or response.code == 40006:  # Partial success
         return response.data
     raise HTTPException(status_code=500, detail=response.message)
@@ -1062,10 +1050,10 @@ async def cancel_geelark_tasks(
 @router.post("/geelark/tasks/retry", tags=["GeeLark"])
 async def retry_geelark_tasks(
     data: TaskRetryRequest,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """Retry failed/cancelled tasks (up to 5 times)."""
-    response = geelark._make_request("/task/restart", {"ids": data.task_ids})
+    response = phone_client._make_request("/task/restart", {"ids": data.task_ids})
     if response.success or response.code == 40006:  # Partial success
         return response.data
     raise HTTPException(status_code=500, detail=response.message)
@@ -1073,7 +1061,7 @@ async def retry_geelark_tasks(
 
 @router.get("/geelark/tasks/history", tags=["GeeLark"])
 async def get_task_history(
-    geelark: GeeLarkClient = Depends(get_geelark_client),
+    phone_client = get_phone_client(),
     size: int = Query(50, le=100),
     last_id: Optional[str] = None
 ):
@@ -1082,7 +1070,7 @@ async def get_task_history(
     if last_id:
         data["lastId"] = last_id
     
-    response = geelark._make_request("/task/historyRecords", data)
+    response = phone_client._make_request("/task/historyRecords", data)
     if response.success:
         return response.data
     raise HTTPException(status_code=500, detail=response.message)
@@ -1091,10 +1079,10 @@ async def get_task_history(
 @router.get("/geelark/tasks/{task_id}/detail", tags=["GeeLark"])
 async def get_task_detail(
     task_id: str,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """Get detailed task info with logs and screenshots."""
-    response = geelark._make_request("/task/detail", {"id": task_id})
+    response = phone_client._make_request("/task/detail", {"id": task_id})
     if response.success:
         return response.data
     raise HTTPException(status_code=500, detail=response.message)
@@ -1103,7 +1091,7 @@ async def get_task_detail(
 @router.post("/geelark/warmup/run", tags=["GeeLark"])
 async def run_warmup_on_phone(
     data: dict,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """
     Run TikTok warmup on any GeeLark phone by ID.
@@ -1128,7 +1116,7 @@ async def run_warmup_on_phone(
     
     if enhanced:
         # Use enhanced warmup with template chaining
-        result = geelark.run_enhanced_warmup(
+        result = phone_client.run_enhanced_warmup(
             phone_ids=[phone_id],
             duration_minutes=duration,
             keywords=keywords,
@@ -1142,7 +1130,7 @@ async def run_warmup_on_phone(
         }
     else:
         # Run standard warmup
-        response = geelark.run_tiktok_warmup(
+        response = phone_client.run_tiktok_warmup(
             phone_ids=[phone_id],
             duration_minutes=duration,
             action=action,

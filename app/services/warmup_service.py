@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from loguru import logger
 
 from app.models.account import Account, AccountStatus, ActivityLog, Schedule, ScheduleType
-from app.services.geelark_client import GeeLarkClient
+# Phone client is injected via constructor (GeeLark or MultiLogin)
 from app.config import get_settings
 
 settings = get_settings()
@@ -36,9 +36,9 @@ class WarmupService:
         5: {"duration_min": 60, "max_likes": 40, "max_follows": 15, "max_comments": 5},
     }
     
-    def __init__(self, db: Session, geelark_client: GeeLarkClient):
+    def __init__(self, db: Session, phone_client):
         self.db = db
-        self.geelark = geelark_client
+        self.phone_client = phone_client
         self.warmup_days = settings.warmup_days
     
     def start_warmup(self, account_id: int) -> bool:
@@ -83,7 +83,7 @@ class WarmupService:
             return False
         
         if not account.geelark_profile_id:
-            logger.error(f"Account {account_id} has no GeeLark profile")
+            logger.error(f"Account {account_id} has no cloud phone profile")
             return False
         
         # Calculate current warmup day
@@ -104,8 +104,8 @@ class WarmupService:
             f"{config['duration_min']}min browse video"
         )
         
-        # Execute warmup flow via GeeLark (browse video action)
-        response = self.geelark.run_tiktok_warmup(
+        # Execute warmup flow via phone client (browse video action)
+        response = self.phone_client.run_tiktok_warmup(
             phone_ids=[account.geelark_profile_id],
             duration_minutes=config["duration_min"],
             action="browse video"
@@ -132,7 +132,7 @@ class WarmupService:
             # ===== AUTO-SHUTDOWN TO SAVE MINUTES =====
             # Stop the phone after warmup to avoid burning subscription time
             logger.info(f"Stopping phone {account.geelark_profile_id} after warmup to save minutes")
-            self.geelark.stop_phones([account.geelark_profile_id])
+            self.phone_client.stop_phones([account.geelark_profile_id])
             
             self._log_activity(account_id, "phone_stopped_after_warmup", {
                 "day": account.warmup_day,

@@ -20,6 +20,9 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
+    # Phone Provider: "geelark" or "multilogin"
+    phone_provider: str = "multilogin"
+    
     # GeeLark Auth Method
     geelark_auth_method: Literal["TOKEN", "KEY"] = "TOKEN"
     
@@ -32,6 +35,12 @@ class Settings(BaseSettings):
     
     # API Base URL
     geelark_api_base_url: str = "https://openapi.geelark.com/open/v1"
+    
+    # MultiLogin X
+    multilogin_email: str = ""
+    multilogin_password: str = ""
+    multilogin_automation_token: str = ""
+    multilogin_launcher_url: str = "https://launcher.mlx.yt:45001"
     
     # Database
     database_url: str = "sqlite:///./data/tiktok_automation.db"

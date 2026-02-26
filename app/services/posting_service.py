@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from loguru import logger
 
 from app.models.account import Account, Video, AccountStatus, ActivityLog, Schedule, ScheduleType
-from app.services.geelark_client import GeeLarkClient
+# Phone client is injected via constructor (GeeLark or MultiLogin)
 from app.config import get_settings
 
 settings = get_settings()
@@ -24,9 +24,9 @@ class PostingService:
     Manages video uploads and TikTok posting automation.
     """
     
-    def __init__(self, db: Session, geelark_client: GeeLarkClient):
+    def __init__(self, db: Session, phone_client):
         self.db = db
-        self.geelark = geelark_client
+        self.phone_client = phone_client
         self.storage_path = Path(settings.video_storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
     
@@ -108,7 +108,7 @@ class PostingService:
         return True
     
     # ===========================
-    # GeeLark Video Upload
+    # Cloud Phone Video Upload
     # ===========================
     
     def upload_video_to_phone(self, video_id: int, account_id: int) -> bool:
@@ -127,7 +127,7 @@ class PostingService:
             return False
         
         # Step 1: Get upload URL
-        response = self.geelark.get_upload_url(
+        response = self.phone_client.get_upload_url(
             filename=video.filename,
             content_type="video/mp4"
         )
@@ -150,7 +150,7 @@ class PostingService:
         
         # Step 3: Transfer to phone
         if resource_url:
-            transfer_response = self.geelark.upload_file_to_phone(
+            transfer_response = self.phone_client.upload_file_to_phone(
                 phone_id=account.geelark_profile_id,
                 resource_url=resource_url,
                 destination_path="/sdcard/DCIM/TikTok/"
@@ -202,7 +202,7 @@ class PostingService:
         account = self.db.query(Account).filter(Account.id == account_id).first()
         
         if not video or not account or not account.geelark_profile_id:
-            logger.error(f"Invalid video/account or missing geelark_profile_id")
+            logger.error(f"Invalid video/account or missing phone profile ID")
             return False
         
         phone_id = account.geelark_profile_id
@@ -212,7 +212,7 @@ class PostingService:
             # Auto-start phone if needed
             if auto_start:
                 logger.info(f"Auto-starting phone {phone_id} for posting...")
-                start_response = self.geelark.start_phones([phone_id])
+                start_response = self.phone_client.start_phones([phone_id])
                 if start_response.success:
                     phone_started = True
                     # Wait for phone to boot (poll every 10s for up to 2 min)
@@ -224,7 +224,7 @@ class PostingService:
                     while waited < max_wait and not phone_running:
                         time.sleep(wait_interval)
                         waited += wait_interval
-                        status_response = self.geelark.get_phone_status([phone_id])
+                        status_response = self.phone_client.get_phone_status([phone_id])
                         if status_response.success and status_response.data:
                             statuses = status_response.data
                             if isinstance(statuses, list) and len(statuses) > 0:
@@ -251,9 +251,9 @@ class PostingService:
                 final_caption += " " + " ".join([f"#{tag}" for tag in video.hashtags.split(",")])
             
             # Execute posting using resourceUrl directly
-            response = self.geelark.post_tiktok_video(
+            response = self.phone_client.post_tiktok_video(
                 phone_id=phone_id,
-                video_url=video.geelark_resource_url,  # Use OSS URL directly
+                video_url=video.geelark_resource_url,  # Uses stored resource URL
                 caption=final_caption
             )
             
@@ -287,7 +287,7 @@ class PostingService:
             if auto_stop and phone_started:
                 logger.info(f"Auto-stopping phone {phone_id} after posting...")
                 time.sleep(5)  # Let task register
-                self.geelark.stop_phones([phone_id])
+                self.phone_client.stop_phones([phone_id])
     
     def schedule_post(
         self,

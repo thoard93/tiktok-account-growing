@@ -218,7 +218,7 @@ st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Navigation",
-    ["📊 Dashboard", "⚡ Pipeline", "👤 Accounts", "🎬 Videos", "⚙️ GeeLark"],
+    ["📊 Dashboard", "⚡ Pipeline", "👤 Accounts", "🎬 Videos", "📱 Phones"],
     label_visibility="collapsed"
 )
 
@@ -359,7 +359,7 @@ if page == "📊 Dashboard":
         col1, col2 = st.columns(2)
         with col1:
             gl = "✅ Connected" if health.get("geelark_connected") else "❌ Disconnected"
-            st.markdown(f"**GeeLark API:** {gl}")
+            st.markdown(f"**Phone Provider:** {gl}")
             st.markdown("**Database:** ✅ Connected")
         with col2:
             st.markdown("**Scheduler:** ✅ Active")
@@ -610,13 +610,13 @@ elif page == "👤 Accounts":
     
     with tab1:
         st.markdown("### Scheduled Accounts")
-        st.caption("Toggle scheduling on/off for each account. Accounts are synced from GeeLark phones.")
+        st.caption("Toggle scheduling on/off for each account. Accounts are synced from cloud phones.")
         
         # Sync button — pulls GeeLark phones into Account table
         col_sync1, col_sync2 = st.columns([3, 1])
         with col_sync2:
-            if st.button("🔄 Sync from GeeLark", use_container_width=True, type="primary"):
-                with st.spinner("Syncing phones from GeeLark..."):
+            if st.button("🔄 Sync from Phones", use_container_width=True, type="primary"):
+                with st.spinner("Syncing phones..."):
                     result = api_post("/accounts/sync-geelark")
                     if result and result.get("success"):
                         created = result.get("created", 0)
@@ -624,7 +624,7 @@ elif page == "👤 Accounts":
                         st.success(f"Synced! {created} new accounts created. {total} total accounts.")
                         st.rerun()
                     else:
-                        st.error("Failed to sync from GeeLark")
+                        st.error("Failed to sync phones")
         
         # Fetch accounts
         accounts_data = api_get("/accounts/scheduled")
@@ -735,7 +735,7 @@ elif page == "👤 Accounts":
                         st.write("—")
         
         else:
-            st.warning("No accounts in database yet. Click **🔄 Sync from GeeLark** above to import your GeeLark phones as accounts.")
+            st.warning("No accounts in database yet. Click **🔄 Sync from Phones** above to import your cloud phones as accounts.")
     
     with tab2:
         st.markdown("### ➕ Add New Account")
@@ -748,7 +748,7 @@ elif page == "👤 Accounts":
                 acct_password = st.text_input("Password", type="password", placeholder="optional")
             with col2:
                 acct_phone = st.text_input("Phone Number", placeholder="optional")
-                acct_phone_id = st.text_input("GeeLark Phone ID", placeholder="From GeeLark dashboard")
+                acct_phone_id = st.text_input("Phone ID", placeholder="From MultiLogin/GeeLark dashboard")
                 auto_schedule = st.checkbox("Auto-schedule for pipeline", value=True)
             
             if st.form_submit_button("Create Account", use_container_width=True, type="primary"):
@@ -896,18 +896,18 @@ elif page == "🎬 Videos":
                         st.warning("Select at least one phone and one video")
         else:
             if not phones or not phones.get("items"):
-                st.warning("No phones available. Add phones in GeeLark first.")
+                st.warning("No phones available. Create phones in MultiLogin first.")
             if not videos or not videos.get("videos"):
                 st.warning("No videos available. Generate videos first.")
 
 
 # ===========================
-# PAGE: GeeLark
+# PAGE: Phones
 # ===========================
 
-elif page == "⚙️ GeeLark":
-    st.markdown("## ⚙️ GeeLark Cloud Phones")
-    st.caption("Direct GeeLark phone management")
+elif page == "📱 Phones":
+    st.markdown("## 📱 Cloud Phones")
+    st.caption("Direct cloud phone management")
     
     tab1, tab2, tab3 = st.tabs(["📱 Cloud Phones", "📋 Task History", "✨ Magic Setup"])
     
@@ -979,7 +979,7 @@ elif page == "⚙️ GeeLark":
     
     with tab3:
         st.markdown("### ✨ Magic Setup")
-        st.caption("Create a new GeeLark phone, install TikTok, and prepare for automation")
+        st.caption("Create a new cloud phone, install TikTok, and prepare for automation")
         
         setup_tab1, setup_tab2 = st.tabs(["🔧 Single Setup", "🎯 Batch Setup"])
         

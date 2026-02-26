@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models.account import Account, ScheduleConfig, PipelineLog, AccountStatus
-from app.services.geelark_client import GeeLarkClient
+from app.services.phone_provider import get_phone_client
 from app.config import get_settings
 
 # EST is UTC-5 (no DST handling — simple offset)
@@ -42,14 +42,14 @@ class AutomationScheduler:
     Background scheduler for the automated daily pipeline.
     
     Pipeline phases:
-    1. Warmup: Start GeeLark phones, run TikTok browsing
+    1. Warmup: Start cloud phones, run TikTok browsing
     2. Video Generation: Generate AI teamwork videos
     3. Posting: Upload and post videos to scheduled accounts
     """
     
-    def __init__(self, geelark_client: GeeLarkClient):
+    def __init__(self, phone_client=None):
         self.settings = get_settings()
-        self.geelark = geelark_client
+        self.phone_client = phone_client or get_phone_client()
         self.scheduler = BackgroundScheduler()
         self._running = False
         logger.info("AutomationScheduler v2.0 initialized")
@@ -164,7 +164,7 @@ class AutomationScheduler:
                     phone_ids.append(pid)
                     phone_names[pid] = name
                 else:
-                    logger.warning(f"Skipping {name} — no GeeLark phone ID")
+                    logger.warning(f"Skipping {name} — no cloud phone ID")
             
             if not phone_ids:
                 logger.warning("No valid phone IDs for warmup")
@@ -204,7 +204,7 @@ class AutomationScheduler:
             # === STEP 1: Boot ALL phones at once ===
             logger.info(f"  → Starting {len(phone_ids)} phones simultaneously...")
             try:
-                start_resp = self.geelark.start_phones(phone_ids)
+                start_resp = self.phone_client.start_phones(phone_ids)
                 if not start_resp.success:
                     raise Exception(f"Batch phone start failed: {start_resp.message}")
                 logger.info(f"  ✓ All {len(phone_ids)} phones starting up")
@@ -226,7 +226,7 @@ class AutomationScheduler:
                 elapsed += poll_interval
                 
                 try:
-                    status_resp = self.geelark.get_phone_status(phone_ids)
+                    status_resp = self.phone_client.get_phone_status(phone_ids)
                     if status_resp.success and status_resp.data:
                         # Check all phones for status 0 (Started)
                         details = status_resp.data.get("successDetails", status_resp.data.get("data", []))
@@ -254,7 +254,7 @@ class AutomationScheduler:
             # === STEP 2: Submit enhanced warmup (warmup + comments + likes) ===
             logger.info(f"  → Submitting enhanced warmup + comments for all {len(phone_ids)} phones...")
             try:
-                warmup_result = self.geelark.run_enhanced_warmup(
+                warmup_result = self.phone_client.run_enhanced_warmup(
                     phone_ids=phone_ids,
                     duration_minutes=warmup_duration_min,
                     keywords=["teamwork trend", "teamwork challenge", "teamwork"],
@@ -284,7 +284,7 @@ class AutomationScheduler:
                 self._log_pipeline(db, "warmup", "failed", error=str(e))
                 # Still try to stop phones on failure
                 try:
-                    self.geelark.stop_phones(phone_ids)
+                    self.phone_client.stop_phones(phone_ids)
                 except Exception:
                     pass
                 return
@@ -337,7 +337,7 @@ class AutomationScheduler:
         """Callback to stop phones after warmup duration completes."""
         logger.info(f"Auto-stopping {len(phone_ids)} phones after warmup...")
         try:
-            resp = self.geelark.stop_phones(phone_ids)
+            resp = self.phone_client.stop_phones(phone_ids)
             if resp.success:
                 logger.info(f"  ✓ {len(phone_ids)} phones stopped successfully")
             else:
@@ -370,7 +370,7 @@ class AutomationScheduler:
         
         # Stop the phones
         try:
-            resp = self.geelark.stop_phones(phone_ids)
+            resp = self.phone_client.stop_phones(phone_ids)
             self._active_warmup_phones = []
             if resp.success:
                 logger.info(f"  ✓ {len(phone_ids)} phones stopped manually")
@@ -633,7 +633,7 @@ class AutomationScheduler:
     # =====================================================================
     
     def check_pending_tasks(self):
-        """Check status of pending GeeLark tasks."""
+        """Check status of pending cloud phone tasks."""
         db = self._get_db()
         try:
             from app.models.account import ActivityLog
@@ -648,7 +648,7 @@ class AutomationScheduler:
             task_ids = [p.geelark_task_id for p in pending]
             logger.debug(f"Checking {len(task_ids)} pending tasks")
             
-            response = self.geelark.query_tasks(task_ids)
+            response = self.phone_client.query_tasks(task_ids)
             if response.success and response.data:
                 for task_data in response.data:
                     task_id = task_data.get("taskId")
@@ -795,9 +795,9 @@ class AutomationScheduler:
 _scheduler_instance: Optional[AutomationScheduler] = None
 
 
-def get_scheduler(geelark_client: GeeLarkClient = None) -> AutomationScheduler:
+def get_scheduler(phone_client=None) -> AutomationScheduler:
     """Get or create scheduler singleton."""
     global _scheduler_instance
-    if _scheduler_instance is None and geelark_client:
-        _scheduler_instance = AutomationScheduler(geelark_client)
+    if _scheduler_instance is None:
+        _scheduler_instance = AutomationScheduler(phone_client)
     return _scheduler_instance
