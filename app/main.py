@@ -50,36 +50,25 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
     
-    # Initialize and start scheduler
+    # Initialize phone provider and start scheduler
     scheduler = None
     try:
-        from app.services.geelark_client import GeeLarkClient
-        creds = settings.get_geelark_credentials()
+        from app.services.phone_provider import get_phone_client, get_provider_name
+        from app.services.scheduler import get_scheduler
         
-        if creds["method"] == "TOKEN" and creds["token"]:
-            client = GeeLarkClient(
-                base_url=settings.geelark_api_base_url,
-                auth_method="TOKEN",
-                app_token=creds["token"]
-            )
-            
-            if client.test_connection():
-                logger.info("GeeLark API connected successfully")
-                
-                # Start the scheduler
-                from app.services.scheduler import get_scheduler
-                scheduler = get_scheduler(client)
-                scheduler.start()
-                
-                # Log all scheduled jobs
-                jobs = scheduler.get_jobs()
-                logger.info(f"Scheduler started with {len(jobs)} jobs:")
-                for job in jobs:
-                    logger.info(f"  → {job['id']}: next run at {job.get('next_run', 'N/A')}")
-            else:
-                logger.warning("GeeLark API connection failed — scheduler NOT started")
-        else:
-            logger.warning("No GeeLark token configured — scheduler NOT started")
+        phone_client = get_phone_client()
+        provider = get_provider_name()
+        logger.info(f"Phone provider '{provider}' initialized successfully")
+        
+        # Start the scheduler with the phone client
+        scheduler = get_scheduler(phone_client)
+        scheduler.start()
+        
+        # Log all scheduled jobs
+        jobs = scheduler.get_jobs()
+        logger.info(f"Scheduler started with {len(jobs)} jobs:")
+        for job in jobs:
+            logger.info(f"  → {job['id']}: next run at {job.get('next_run', 'N/A')}")
     except Exception as e:
         logger.error(f"Scheduler startup failed: {e}")
     
