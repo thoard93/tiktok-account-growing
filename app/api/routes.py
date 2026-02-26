@@ -1146,7 +1146,7 @@ async def run_warmup_on_phone(
 @router.post("/geelark/warmup/enhanced", tags=["GeeLark"])
 async def run_enhanced_warmup(
     data: dict,
-    geelark: GeeLarkClient = Depends(get_geelark_client)
+    phone_client = get_phone_client()
 ):
     """
     Run enhanced warmup with template chaining on multiple phones.
@@ -1171,7 +1171,7 @@ async def run_enhanced_warmup(
         raise HTTPException(status_code=400, detail="phone_ids is required")
     
     # Run enhanced warmup with template chaining
-    result = geelark.run_enhanced_warmup(
+    result = phone_client.run_enhanced_warmup(
         phone_ids=phone_ids,
         duration_minutes=duration,
         keywords=keywords,
@@ -1505,7 +1505,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
     import requests as req
     from pathlib import Path
     from app.services.video_generator import get_video_generator
-    from app.services.geelark_client import GeeLarkClient
+    from app.services.phone_provider import get_phone_client
     from app.config import get_settings
     settings = get_settings()
     
@@ -1516,21 +1516,8 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
             _posting_jobs[job_id]["status"] = "running"
             _posting_jobs[job_id]["message"] = "Initializing..."
         
-        # Create fresh GeeLark client for background thread
-        creds = settings.get_geelark_credentials()
-        if creds.get("method") == "TOKEN":
-            geelark = GeeLarkClient(
-                base_url=settings.geelark_api_base_url,
-                auth_method="TOKEN",
-                app_token=creds.get("token")
-            )
-        else:
-            geelark = GeeLarkClient(
-                base_url=settings.geelark_api_base_url,
-                auth_method="KEY",
-                app_id=creds.get("app_id"),
-                api_key=creds.get("api_key")
-            )
+        # Create phone client for background thread
+        phone_client = get_phone_client()
         
         generator = get_video_generator()
         results = []
@@ -1542,7 +1529,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
                 _posting_jobs[job_id]["message"] = f"Starting {len(phone_ids)} phone(s)..."
             
             logger.info(f"[PostJob {job_id}] Auto-starting phones...")
-            start_response = geelark.start_phones(phone_ids)
+            start_response = phone_client.start_phones(phone_ids)
             if start_response.success:
                 phones_started = phone_ids.copy()
                 
@@ -1559,7 +1546,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
                     with _posting_jobs_lock:
                         _posting_jobs[job_id]["message"] = f"Waiting for phones to boot... ({waited}s)"
                     
-                    status_response = geelark.get_phone_status(phone_ids)
+                    status_response = phone_client.get_phone_status(phone_ids)
                     if status_response.success and status_response.data:
                         statuses = status_response.data
                         if isinstance(statuses, list):
@@ -1604,7 +1591,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
             
             # Get upload URL
             logger.info(f"[PostJob {job_id}] Getting upload URL for {video_filename}...")
-            upload_response = geelark.get_upload_url(video_filename)
+            upload_response = phone_client.get_upload_url(video_filename)
             if not upload_response.success:
                 logger.error(f"[PostJob {job_id}] Upload URL failed: {upload_response.message}")
                 results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": f"Upload URL failed: {upload_response.message}"})
@@ -1618,7 +1605,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
                 results.append({"video": video_filename, "phone_id": phone_id, "success": False, "error": "No upload URL returned"})
                 continue
             
-            # Upload to GeeLark OSS
+            # Upload to cloud phone storage
             try:
                 with open(video_path, "rb") as f:
                     upload_res = req.put(upload_url, data=f, timeout=120)
@@ -1631,7 +1618,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
             
             # Transfer to this specific phone
             logger.info(f"[PostJob {job_id}] Transferring video to phone {phone_id[:8]}...")
-            transfer_response = geelark.upload_file_to_phone(
+            transfer_response = phone_client.upload_file_to_phone(
                 phone_id=phone_id,
                 resource_url=resource_url,
                 destination_path="/sdcard/Download/"
@@ -1646,7 +1633,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
             time.sleep(2)
             
             logger.info(f"[PostJob {job_id}] Creating RPA task to post video...")
-            post_response = geelark.post_tiktok_video(
+            post_response = phone_client.post_tiktok_video(
                 phone_id=phone_id,
                 video_url=resource_url,
                 caption=full_caption
@@ -1668,7 +1655,7 @@ def _run_posting_job(job_id: str, video_filenames: list, phone_ids: list, captio
             with _posting_jobs_lock:
                 _posting_jobs[job_id]["message"] = "Stopping phones..."
             time.sleep(5)
-            geelark.stop_phones(phones_started)
+            phone_client.stop_phones(phones_started)
         
         # Auto-delete videos
         deleted_videos = []
@@ -2068,18 +2055,18 @@ async def stop_warmup_now():
 
 @router.post("/accounts/sync-geelark", tags=["Accounts"])
 async def sync_accounts_from_geelark(
-    geelark: GeeLarkClient = Depends(get_geelark_client),
     db: Session = Depends(get_db)
 ):
     """
-    Sync GeeLark phones into the accounts table.
+    Sync cloud phones into the accounts table.
     Creates Account records for any phones that don't have one yet.
-    This ensures all GeeLark phones appear on the Accounts scheduling page.
+    This ensures all phones appear on the Accounts scheduling page.
     """
-    # Fetch all phones from GeeLark
-    response = geelark.list_phones(page=1, page_size=100)
+    # Fetch all phones from provider
+    phone_client = get_phone_client()
+    response = phone_client.list_phones(page=1, page_size=100)
     if not response.success:
-        raise HTTPException(502, f"Failed to fetch GeeLark phones: {response.message}")
+        raise HTTPException(502, f"Failed to fetch phones: {response.message}")
     
     phones = response.data if isinstance(response.data, list) else response.data.get("items", []) if isinstance(response.data, dict) else []
     
