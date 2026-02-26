@@ -53,25 +53,32 @@ async def lifespan(app: FastAPI):
     # Initialize phone provider and start scheduler
     scheduler = None
     try:
+        logger.info("Step 1/3: Initializing phone provider...")
         from app.services.phone_provider import get_phone_client, get_provider_name
-        from app.services.scheduler import get_scheduler
         
         phone_client = get_phone_client()
         provider = get_provider_name()
-        logger.info(f"Phone provider '{provider}' initialized successfully")
+        logger.info(f"Step 1/3: Phone provider '{provider}' initialized successfully")
         
-        # Start the scheduler with the phone client
+        logger.info("Step 2/3: Creating scheduler...")
+        from app.services.scheduler import get_scheduler
         scheduler = get_scheduler(phone_client)
+        logger.info("Step 2/3: Scheduler created")
+        
+        logger.info("Step 3/3: Starting scheduler jobs...")
         scheduler.start()
         
         # Log all scheduled jobs
         jobs = scheduler.get_jobs()
-        logger.info(f"Scheduler started with {len(jobs)} jobs:")
+        logger.info(f"Step 3/3: Scheduler started with {len(jobs)} jobs:")
         for job in jobs:
             logger.info(f"  → {job['id']}: next run at {job.get('next_run', 'N/A')}")
     except Exception as e:
+        import traceback
         logger.error(f"Scheduler startup failed: {e}")
+        logger.error(traceback.format_exc())
     
+    logger.info("=== APP READY - serving requests ===")
     yield
     
     # Shutdown
