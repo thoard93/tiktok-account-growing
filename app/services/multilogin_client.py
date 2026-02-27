@@ -478,6 +478,7 @@ class MultiLoginClient:
         payload = {
             "search_text": search_text or "",
             "os_type": "android",
+            "storage_type": storage_type if storage_type != "all" else "cloud",
             "limit": min(limit, 100),
             "offset": offset
         }
