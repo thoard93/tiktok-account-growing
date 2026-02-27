@@ -481,7 +481,6 @@ class MultiLoginClient:
         """
         payload = {
             "search_text": search_text or "",
-            "storage_type": "cloud",
             "limit": min(limit, 100),
             "offset": offset
         }
