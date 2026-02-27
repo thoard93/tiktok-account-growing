@@ -761,6 +761,52 @@ elif page == "👤 Accounts":
     with tab2:
         st.markdown("### ➕ Add New Account")
         
+        # Quick bulk import for MultiLogin phones
+        st.markdown("#### 📱 Quick Import from MultiLogin")
+        st.caption("Paste your phone profile IDs from MultiLogin desktop app (one per line: `name,profile_id`)")
+        
+        bulk_input = st.text_area(
+            "Phones (name,profile_id per line)",
+            placeholder="test3,60808076967123628\ntester2,60807983892132892\ntester,60807725947499324",
+            height=120
+        )
+        
+        if st.button("🚀 Import Phones", type="primary", use_container_width=True):
+            if bulk_input.strip():
+                imported = 0
+                for line in bulk_input.strip().split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) >= 2:
+                        name, profile_id = parts[0], parts[1]
+                    elif len(parts) == 1:
+                        name = f"Phone {parts[0][:8]}"
+                        profile_id = parts[0]
+                    else:
+                        continue
+                    
+                    # Create account via API
+                    result = api_post("/accounts", {"name": name})
+                    if result:
+                        acct_id = result.get("id")
+                        if acct_id:
+                            api_post(f"/accounts/{acct_id}/update", {"geelark_profile_id": profile_id})
+                            api_post(f"/accounts/{acct_id}/schedule", {"enabled": True, "warmup": True, "posting": True})
+                            imported += 1
+                
+                if imported > 0:
+                    st.success(f"✅ Imported {imported} phone(s) as accounts!")
+                    st.rerun()
+                else:
+                    st.error("No valid entries found. Use format: name,profile_id")
+            else:
+                st.warning("Please paste phone data first")
+        
+        st.markdown("---")
+        st.markdown("#### ✏️ Manual Entry")
+        
         with st.form("create_account"):
             col1, col2 = st.columns(2)
             with col1:
