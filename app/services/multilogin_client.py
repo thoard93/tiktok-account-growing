@@ -477,6 +477,7 @@ class MultiLoginClient:
         """
         payload = {
             "search_text": search_text or "",
+            "os_type": "android",
             "limit": min(limit, 100),
             "offset": offset
         }
