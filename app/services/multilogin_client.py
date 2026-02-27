@@ -467,7 +467,9 @@ class MultiLoginClient:
         """
         List/search mobile profiles.
         
-        Equivalent to GeeLarkClient.list_phones().
+        Uses folder-based search: first lists all folders, then searches
+        for Android profiles within each folder. This is needed because
+        /profile/search doesn't return mobile profiles without folder context.
         
         Args:
             search_text: Filter by name
@@ -479,19 +481,84 @@ class MultiLoginClient:
         Returns:
             MultiLoginResponse with list of profiles
         """
-        payload = {
-            "search_text": search_text or "",
-            "os_type": "android",
-            "limit": min(limit, 100),
-            "offset": offset
-        }
+        all_profiles = []
         
-        if storage_type and storage_type != "all":
-            payload["storage_type"] = storage_type
-        if folder_id:
-            payload["folder_id"] = folder_id
+        # Step 1: List all folders
+        folders_response = self._management_request(
+            "POST", "/folder/search", {"limit": 50, "offset": 0}
+        )
         
-        return self._management_request("POST", "/profile/search", payload)
+        logger.info(f"Folder search result: success={folders_response.success}, data_type={type(folders_response.data).__name__}")
+        if isinstance(folders_response.data, dict):
+            logger.info(f"Folder search keys: {list(folders_response.data.keys())}")
+            import json
+            logger.info(f"Folder search preview: {json.dumps(folders_response.data, default=str)[:500]}")
+        
+        # Extract folder list
+        folders = []
+        if folders_response.success and isinstance(folders_response.data, dict):
+            folders = folders_response.data.get("folders", [])
+            if not folders:
+                # Also try 'data' key in case response wraps differently
+                inner = folders_response.data.get("data", {})
+                if isinstance(inner, dict):
+                    folders = inner.get("folders", [])
+        
+        logger.info(f"Found {len(folders)} folders")
+        
+        if folders:
+            # Step 2: Search each folder for Android profiles
+            for folder in folders:
+                fid = folder.get("id") or folder.get("folder_id")
+                fname = folder.get("name", "Unknown")
+                
+                if not fid:
+                    continue
+                
+                payload = {
+                    "search_text": search_text or "",
+                    "os_type": "android",
+                    "folder_id": fid,
+                    "limit": min(limit, 100),
+                    "offset": offset
+                }
+                
+                response = self._management_request("POST", "/profile/search", payload)
+                
+                profiles = []
+                if response.success and isinstance(response.data, dict):
+                    profiles = response.data.get("profiles") or []
+                
+                logger.info(f"Folder '{fname}' (ID: {fid}) → {len(profiles)} mobile profiles")
+                all_profiles.extend(profiles)
+                
+                time.sleep(0.3)  # Rate limit safety
+        else:
+            # Fallback: try direct search without folder
+            logger.info("No folders found, trying direct profile search")
+            payload = {
+                "search_text": search_text or "",
+                "os_type": "android",
+                "limit": min(limit, 100),
+                "offset": offset
+            }
+            if folder_id:
+                payload["folder_id"] = folder_id
+            
+            response = self._management_request("POST", "/profile/search", payload)
+            if response.success and isinstance(response.data, dict):
+                all_profiles = response.data.get("profiles") or []
+                logger.info(f"Direct search found {len(all_profiles)} profiles")
+        
+        total = len(all_profiles)
+        logger.info(f"Total mobile profiles found across all folders: {total}")
+        
+        return MultiLoginResponse(
+            success=True,
+            status_code=200,
+            message=f"Found {total} mobile profiles",
+            data={"profiles": all_profiles, "total_count": total}
+        )
     
     def get_phone_status(self, profile_id: str) -> MultiLoginResponse:
         """
