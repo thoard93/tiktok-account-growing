@@ -263,11 +263,15 @@ class MultiLoginClient:
                     data=result
                 )
             
+            response_data = result.get("data", result)
+            if endpoint == "/profile/search":
+                logger.info(f"MultiLogin profile/search: sent payload={data}")
+                logger.info(f"MultiLogin profile/search: full raw result={result}")
             return MultiLoginResponse(
                 success=True,
                 status_code=status,
                 message="OK",
-                data=result.get("data", result)
+                data=response_data
             )
             
         except requests.exceptions.Timeout:
@@ -477,8 +481,7 @@ class MultiLoginClient:
         """
         payload = {
             "search_text": search_text or "",
-            "os_type": "android",
-            "storage_type": storage_type if storage_type != "all" else "cloud",
+            "storage_type": "cloud",
             "limit": min(limit, 100),
             "offset": offset
         }
