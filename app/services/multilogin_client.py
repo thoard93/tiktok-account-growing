@@ -476,6 +476,7 @@ class MultiLoginClient:
             MultiLoginResponse with list of profiles
         """
         payload = {
+            "search_text": search_text or "",
             "offset": offset,
             "limit": min(limit, 100),
             "is_removed": False
@@ -483,8 +484,6 @@ class MultiLoginClient:
         
         if storage_type and storage_type != "all":
             payload["storage_type"] = storage_type
-        if search_text:
-            payload["search_text"] = search_text
         if folder_id:
             payload["folder_id"] = folder_id
         
