@@ -2136,7 +2136,7 @@ async def sync_accounts_from_geelark(
     }
 
 
-@router.delete("/accounts/clear", tags=["Accounts"])
+@router.post("/accounts/clear", tags=["Accounts"])
 async def clear_all_accounts(
     db: Session = Depends(get_db)
 ):

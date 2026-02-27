@@ -253,6 +253,9 @@ class MultiLoginClient:
             if not success:
                 msg = result.get("message", result.get("error", f"HTTP {status}"))
                 logger.warning(f"MultiLogin API Error: {endpoint} → {msg} (HTTP {status})")
+                logger.warning(f"MultiLogin API Error Body: {result}")
+                if data:
+                    logger.warning(f"MultiLogin API Request Payload: {data}")
                 return MultiLoginResponse(
                     success=False,
                     status_code=status,
@@ -475,11 +478,11 @@ class MultiLoginClient:
         payload = {
             "offset": offset,
             "limit": min(limit, 100),
-            "storage_type": storage_type,
-            "os_type": "android",  # Only show mobile profiles
             "is_removed": False
         }
         
+        if storage_type and storage_type != "all":
+            payload["storage_type"] = storage_type
         if search_text:
             payload["search_text"] = search_text
         if folder_id:

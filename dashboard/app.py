@@ -635,7 +635,7 @@ elif page == "👤 Accounts":
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("✅ Yes, clear everything", type="primary"):
-                    result = api_delete("/accounts/clear")
+                    result = api_post("/accounts/clear")
                     if result and result.get("success"):
                         st.success(f"Cleared {result.get('deleted', 0)} accounts")
                         st.session_state["confirm_clear"] = False
