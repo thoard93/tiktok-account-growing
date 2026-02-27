@@ -2077,13 +2077,30 @@ async def sync_accounts_from_geelark(
     
     # Parse response data — handle both list and dict formats
     raw_data = response.data
+    logger.info(f"Sync: raw response type={type(raw_data).__name__}")
+    if isinstance(raw_data, dict):
+        logger.info(f"Sync: response keys={list(raw_data.keys())}")
+        # Log first 500 chars of response to see structure
+        import json
+        logger.info(f"Sync: response preview={json.dumps(raw_data, default=str)[:500]}")
+    
     if isinstance(raw_data, list):
         phones = raw_data
     elif isinstance(raw_data, dict):
-        # MultiLogin returns {"data": [...]} or GeeLark returns {"items": [...]}
-        phones = raw_data.get("data", raw_data.get("items", raw_data.get("list", [])))
+        # Try common response keys: data, items, list, profiles
+        phones = (
+            raw_data.get("profiles") or
+            raw_data.get("data") or 
+            raw_data.get("items") or 
+            raw_data.get("list") or 
+            []
+        )
         if not isinstance(phones, list):
-            phones = []
+            # Maybe the profiles are nested deeper
+            if isinstance(phones, dict):
+                phones = phones.get("profiles") or phones.get("items") or phones.get("data") or []
+            if not isinstance(phones, list):
+                phones = []
     else:
         phones = []
     
