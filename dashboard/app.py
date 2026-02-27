@@ -612,19 +612,40 @@ elif page == "👤 Accounts":
         st.markdown("### Scheduled Accounts")
         st.caption("Toggle scheduling on/off for each account. Accounts are synced from cloud phones.")
         
-        # Sync button — pulls GeeLark phones into Account table
-        col_sync1, col_sync2 = st.columns([3, 1])
+        # Sync button — pulls phones into Account table
+        col_sync1, col_sync2, col_sync3 = st.columns([2, 1, 1])
         with col_sync2:
             if st.button("🔄 Sync from Phones", use_container_width=True, type="primary"):
                 with st.spinner("Syncing phones..."):
                     result = api_post("/accounts/sync-geelark")
                     if result and result.get("success"):
                         created = result.get("created", 0)
+                        found = result.get("phones_found", 0)
                         total = result.get("total_accounts", 0)
-                        st.success(f"Synced! {created} new accounts created. {total} total accounts.")
+                        st.success(f"Synced! Found {found} phones, created {created} new accounts. {total} total.")
                         st.rerun()
                     else:
                         st.error("Failed to sync phones")
+        with col_sync3:
+            if st.button("🗑️ Clear All", use_container_width=True):
+                st.session_state["confirm_clear"] = True
+        
+        if st.session_state.get("confirm_clear"):
+            st.warning("⚠️ This will delete ALL accounts and activity logs. Are you sure?")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Yes, clear everything", type="primary"):
+                    result = api_delete("/accounts/clear")
+                    if result and result.get("success"):
+                        st.success(f"Cleared {result.get('deleted', 0)} accounts")
+                        st.session_state["confirm_clear"] = False
+                        st.rerun()
+                    else:
+                        st.error("Failed to clear accounts")
+            with c2:
+                if st.button("❌ Cancel"):
+                    st.session_state["confirm_clear"] = False
+                    st.rerun()
         
         # Fetch accounts
         accounts_data = api_get("/accounts/scheduled")

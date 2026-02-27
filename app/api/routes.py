@@ -2062,23 +2062,44 @@ async def sync_accounts_from_geelark(
     Creates Account records for any phones that don't have one yet.
     This ensures all phones appear on the Accounts scheduling page.
     """
-    # Fetch all phones from provider
+    from app.services.phone_provider import is_multilogin
+    
     phone_client = get_phone_client()
-    response = phone_client.list_phones(page=1, page_size=100)
+    
+    # Fetch phones using provider-appropriate parameters
+    if is_multilogin():
+        response = phone_client.list_phones(offset=0, limit=100)
+    else:
+        response = phone_client.list_phones(page=1, page_size=100)
+    
     if not response.success:
         raise HTTPException(502, f"Failed to fetch phones: {response.message}")
     
-    phones = response.data if isinstance(response.data, list) else response.data.get("items", []) if isinstance(response.data, dict) else []
+    # Parse response data — handle both list and dict formats
+    raw_data = response.data
+    if isinstance(raw_data, list):
+        phones = raw_data
+    elif isinstance(raw_data, dict):
+        # MultiLogin returns {"data": [...]} or GeeLark returns {"items": [...]}
+        phones = raw_data.get("data", raw_data.get("items", raw_data.get("list", [])))
+        if not isinstance(phones, list):
+            phones = []
+    else:
+        phones = []
+    
+    logger.info(f"Sync: found {len(phones)} phones from provider")
     
     created = 0
     updated = 0
     
     for phone in phones:
-        phone_id = phone.get("id") or phone.get("phoneId")
+        # Extract phone ID — MultiLogin uses "uuid", GeeLark uses "id"/"phoneId"
+        phone_id = phone.get("uuid") or phone.get("id") or phone.get("phoneId")
         if not phone_id:
             continue
         
-        name = phone.get("serialName") or phone.get("name") or f"Phone {phone_id[:8]}"
+        # Extract name — MultiLogin uses "name", GeeLark uses "serialName"/"name"
+        name = phone.get("name") or phone.get("serialName") or f"Phone {str(phone_id)[:8]}"
         
         # Check if account exists for this phone
         account = db.query(Account).filter(Account.geelark_profile_id == phone_id).first()
@@ -2095,6 +2116,7 @@ async def sync_accounts_from_geelark(
             )
             db.add(account)
             created += 1
+            logger.info(f"  + Created account: {name} ({str(phone_id)[:8]}...)")
         else:
             # Update name if changed
             if account.geelark_profile_name != name:
@@ -2111,6 +2133,33 @@ async def sync_accounts_from_geelark(
         "updated": updated,
         "total_accounts": total,
         "phones_found": len(phones),
+    }
+
+
+@router.delete("/accounts/clear", tags=["Accounts"])
+async def clear_all_accounts(
+    db: Session = Depends(get_db)
+):
+    """
+    Delete ALL accounts from the database.
+    Use this to clean up old GeeLark accounts before syncing MultiLogin phones.
+    """
+    count = db.query(Account).count()
+    
+    # Also clear related data
+    from app.models.account import ActivityLog, PipelineLog, FollowerSnapshot
+    db.query(ActivityLog).delete()
+    db.query(PipelineLog).delete()
+    db.query(FollowerSnapshot).delete()
+    db.query(Account).delete()
+    db.commit()
+    
+    logger.info(f"Cleared {count} accounts and all related logs")
+    
+    return {
+        "success": True,
+        "deleted": count,
+        "message": f"Deleted {count} accounts and all related activity logs"
     }
 
 
