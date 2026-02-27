@@ -73,12 +73,12 @@ async def health_check(
     db: Session = Depends(get_db),
 ):
     """Check system health and connectivity."""
-    # Test phone provider connection
-    phone_client = get_phone_client()
+    # Just check if phone client is initialized (no external API call)
+    # Render pings this every ~10s — calling test_connection() would
+    # hammer the MultiLogin API and trigger 429 rate limits
     try:
-        phone_ok = phone_client.test_connection() if hasattr(phone_client, 'test_connection') else True
-        if hasattr(phone_ok, 'success'):
-            phone_ok = phone_ok.success
+        phone_client = get_phone_client()
+        phone_ok = phone_client is not None
     except Exception:
         phone_ok = False
     
