@@ -477,9 +477,8 @@ class MultiLoginClient:
         """
         payload = {
             "search_text": search_text or "",
-            "offset": offset,
             "limit": min(limit, 100),
-            "is_removed": False
+            "offset": offset
         }
         
         if storage_type and storage_type != "all":
