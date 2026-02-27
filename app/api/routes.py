@@ -942,11 +942,11 @@ async def get_activity_logs(
 
 @router.get("/geelark/phones", tags=["GeeLark"])
 async def list_geelark_phones(
-    phone_client = get_phone_client(),
     page: int = 1,
     page_size: int = 100  # Increased to get all phones at once (max 100)
 ):
     """List cloud phones directly from GeeLark."""
+    phone_client = get_phone_client()
     response = phone_client.list_phones(page=page, page_size=page_size)
     if response.success:
         return response.data
@@ -955,10 +955,10 @@ async def list_geelark_phones(
 
 @router.post("/geelark/phones/create", tags=["GeeLark"])
 async def create_geelark_phone(
-    data: PhoneCreateRequest,
-    phone_client = get_phone_client()
+    data: PhoneCreateRequest
 ):
     """Create a cloud phone directly via GeeLark."""
+    phone_client = get_phone_client()
     response = phone_client.create_single_phone(
         name=data.name,
         proxy_string=data.proxy_string,
@@ -975,10 +975,10 @@ async def create_geelark_phone(
 
 @router.post("/geelark/phones/start", tags=["GeeLark"])
 async def start_geelark_phones(
-    data: PhoneStartRequest,
-    phone_client = get_phone_client()
+    data: PhoneStartRequest
 ):
     """Start cloud phones via GeeLark."""
+    phone_client = get_phone_client()
     response = phone_client.start_phones(
         ids=data.ids,
         width=data.width,
@@ -991,10 +991,10 @@ async def start_geelark_phones(
 
 @router.post("/geelark/phones/stop", tags=["GeeLark"])
 async def stop_geelark_phones(
-    ids: List[str],
-    phone_client = get_phone_client()
+    ids: List[str]
 ):
     """Stop cloud phones via GeeLark."""
+    phone_client = get_phone_client()
     response = phone_client.stop_phones(ids)
     if response.success:
         return response.data
@@ -1003,10 +1003,10 @@ async def stop_geelark_phones(
 
 @router.post("/geelark/tasks/query", tags=["GeeLark"])
 async def query_geelark_tasks(
-    data: TaskQueryRequest,
-    phone_client = get_phone_client()
+    data: TaskQueryRequest
 ):
     """Query task status from GeeLark. If task_ids provided, queries specific tasks. Otherwise returns task history."""
+    phone_client = get_phone_client()
     # If specific task IDs provided, query those
     if data.task_ids:
         response = phone_client.query_tasks(data.task_ids)
@@ -1037,10 +1037,10 @@ async def query_geelark_tasks(
 
 @router.post("/geelark/tasks/cancel", tags=["GeeLark"])
 async def cancel_geelark_tasks(
-    data: TaskCancelRequest,
-    phone_client = get_phone_client()
+    data: TaskCancelRequest
 ):
     """Cancel waiting/in-progress tasks."""
+    phone_client = get_phone_client()
     response = phone_client._make_request("/task/cancel", {"ids": data.task_ids})
     if response.success or response.code == 40006:  # Partial success
         return response.data
@@ -1049,10 +1049,10 @@ async def cancel_geelark_tasks(
 
 @router.post("/geelark/tasks/retry", tags=["GeeLark"])
 async def retry_geelark_tasks(
-    data: TaskRetryRequest,
-    phone_client = get_phone_client()
+    data: TaskRetryRequest
 ):
     """Retry failed/cancelled tasks (up to 5 times)."""
+    phone_client = get_phone_client()
     response = phone_client._make_request("/task/restart", {"ids": data.task_ids})
     if response.success or response.code == 40006:  # Partial success
         return response.data
@@ -1061,11 +1061,11 @@ async def retry_geelark_tasks(
 
 @router.get("/geelark/tasks/history", tags=["GeeLark"])
 async def get_task_history(
-    phone_client = get_phone_client(),
     size: int = Query(50, le=100),
     last_id: Optional[str] = None
 ):
     """Get task history from last 7 days."""
+    phone_client = get_phone_client()
     data = {"size": size}
     if last_id:
         data["lastId"] = last_id
@@ -1078,10 +1078,10 @@ async def get_task_history(
 
 @router.get("/geelark/tasks/{task_id}/detail", tags=["GeeLark"])
 async def get_task_detail(
-    task_id: str,
-    phone_client = get_phone_client()
+    task_id: str
 ):
     """Get detailed task info with logs and screenshots."""
+    phone_client = get_phone_client()
     response = phone_client._make_request("/task/detail", {"id": task_id})
     if response.success:
         return response.data
@@ -1090,8 +1090,7 @@ async def get_task_detail(
 
 @router.post("/geelark/warmup/run", tags=["GeeLark"])
 async def run_warmup_on_phone(
-    data: dict,
-    phone_client = get_phone_client()
+    data: dict
 ):
     """
     Run TikTok warmup on any GeeLark phone by ID.
@@ -1114,6 +1113,7 @@ async def run_warmup_on_phone(
     enable_comments = data.get("enable_comments", True)
     enable_likes = data.get("enable_likes", True)
     
+    phone_client = get_phone_client()
     if enhanced:
         # Use enhanced warmup with template chaining
         result = phone_client.run_enhanced_warmup(
@@ -1145,8 +1145,7 @@ async def run_warmup_on_phone(
 
 @router.post("/geelark/warmup/enhanced", tags=["GeeLark"])
 async def run_enhanced_warmup(
-    data: dict,
-    phone_client = get_phone_client()
+    data: dict
 ):
     """
     Run enhanced warmup with template chaining on multiple phones.
@@ -1171,6 +1170,7 @@ async def run_enhanced_warmup(
         raise HTTPException(status_code=400, detail="phone_ids is required")
     
     # Run enhanced warmup with template chaining
+    phone_client = get_phone_client()
     result = phone_client.run_enhanced_warmup(
         phone_ids=phone_ids,
         duration_minutes=duration,
