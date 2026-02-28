@@ -773,32 +773,26 @@ elif page == "👤 Accounts":
         
         if st.button("🚀 Import Phones", type="primary", use_container_width=True):
             if bulk_input.strip():
-                imported = 0
+                phones = []
                 for line in bulk_input.strip().split("\n"):
                     line = line.strip()
                     if not line:
                         continue
                     parts = [p.strip() for p in line.split(",")]
                     if len(parts) >= 2:
-                        name, profile_id = parts[0], parts[1]
-                    elif len(parts) == 1:
-                        name = f"Phone {parts[0][:8]}"
-                        profile_id = parts[0]
-                    else:
-                        continue
-                    
-                    # Create account via API
-                    result = api_post("/accounts", {"name": name})
-                    if result:
-                        acct_id = result.get("id")
-                        if acct_id:
-                            api_post(f"/accounts/{acct_id}/update", {"geelark_profile_id": profile_id})
-                            api_post(f"/accounts/{acct_id}/schedule", {"enabled": True, "warmup": True, "posting": True})
-                            imported += 1
+                        phones.append({"name": parts[0], "profile_id": parts[1]})
+                    elif len(parts) == 1 and parts[0]:
+                        phones.append({"name": f"Phone {parts[0][:8]}", "profile_id": parts[0]})
                 
-                if imported > 0:
-                    st.success(f"✅ Imported {imported} phone(s) as accounts!")
-                    st.rerun()
+                if phones:
+                    result = api_post("/accounts/import", {"phones": phones})
+                    if result and result.get("success"):
+                        created = result.get("created", 0)
+                        skipped = result.get("skipped", 0)
+                        st.success(f"✅ Imported {created} phone(s)! ({skipped} duplicates skipped)")
+                        st.rerun()
+                    else:
+                        st.error("Import failed — check server logs")
                 else:
                     st.error("No valid entries found. Use format: name,profile_id")
             else:
@@ -820,20 +814,18 @@ elif page == "👤 Accounts":
             
             if st.form_submit_button("Create Account", use_container_width=True, type="primary"):
                 if acct_name:
-                    result = api_post("/accounts", {
-                        "name": acct_name,
-                        "email": acct_email,
-                        "password": acct_password,
-                        "phone": acct_phone,
+                    # Use import endpoint for reliable account creation
+                    result = api_post("/accounts/import", {
+                        "phones": [{
+                            "name": acct_name,
+                            "profile_id": acct_phone_id or f"manual-{acct_name}"
+                        }]
                     })
-                    if result:
-                        acct_id = result.get("id")
-                        if acct_id and acct_phone_id:
-                            api_post(f"/accounts/{acct_id}/update", {"geelark_profile_id": acct_phone_id})
-                        if acct_id and auto_schedule:
-                            api_post(f"/accounts/{acct_id}/schedule", {"enabled": True, "warmup": True, "posting": True})
+                    if result and result.get("success"):
                         st.success(f"Account '{acct_name}' created!")
                         st.rerun()
+                    else:
+                        st.error("Failed to create account")
                 else:
                     st.warning("Please enter an account name")
     

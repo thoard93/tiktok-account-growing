@@ -2180,6 +2180,64 @@ async def clear_all_accounts(
     }
 
 
+@router.post("/accounts/import", tags=["Accounts"])
+async def import_accounts(
+    data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Import accounts manually by providing name + profile_id pairs.
+    Bypasses phone creation API — for manual MultiLogin phone import.
+    
+    Body: {"phones": [{"name": "test3", "profile_id": "60808..."}, ...]}
+    """
+    phones = data.get("phones", [])
+    if not phones:
+        raise HTTPException(400, "No phones provided. Send {\"phones\": [{\"name\": \"...\", \"profile_id\": \"...\"}]}")
+    
+    created = 0
+    skipped = 0
+    
+    for phone in phones:
+        name = phone.get("name", "").strip()
+        profile_id = phone.get("profile_id", "").strip()
+        
+        if not profile_id:
+            continue
+        
+        if not name:
+            name = f"Phone {profile_id[:8]}"
+        
+        # Check for duplicate
+        existing = db.query(Account).filter(Account.geelark_profile_id == profile_id).first()
+        if existing:
+            skipped += 1
+            logger.info(f"Import: skipped duplicate {name} ({profile_id[:8]}...)")
+            continue
+        
+        account = Account(
+            geelark_profile_id=profile_id,
+            geelark_profile_name=name,
+            status=AccountStatus.CREATED,
+            schedule_enabled=True,
+            schedule_warmup=True,
+            schedule_posting=True,
+        )
+        db.add(account)
+        created += 1
+        logger.info(f"Import: created account {name} ({profile_id[:8]}...)")
+    
+    db.commit()
+    total = db.query(Account).count()
+    
+    return {
+        "success": True,
+        "created": created,
+        "skipped": skipped,
+        "total_accounts": total,
+    }
+
+
 # ===========================
 # Follower Tracking
 # ===========================
