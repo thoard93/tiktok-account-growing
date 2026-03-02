@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
     
     # Phone Provider: "geelark" or "multilogin"
-    phone_provider: str = "multilogin"
+    phone_provider: str = "geelark"
     
     # GeeLark Auth Method
     geelark_auth_method: Literal["TOKEN", "KEY"] = "TOKEN"
