@@ -1075,7 +1075,7 @@ class GeeLarkClient:
         enable_comments: bool = True,
         enable_likes: bool = True,
         enable_follow_back: bool = True,
-        comment_prompt: str = "Short positive teamwork comment",
+        comment_prompt: str = "Short supportive Christian comment with emoji like 🙏 ❤️ — e.g. 'amen 🙏', 'jesus loves you ❤️', 'blessed 🙌', 'support back 🙏', 'f4f 🙏'",
         like_probability: int = 30,
         schedule_at: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -1114,13 +1114,15 @@ class GeeLarkClient:
             "errors": []
         }
         
-        # Default teamwork keywords
+        # Default JesusAI keywords (target accounts in our niche)
         if not keywords:
             keywords = [
-                "teamwork trend",
-                "teamwork challenge", 
-                "teamwork goals",
-                "teamwork makes the dream work"
+                "jesus",
+                "jesus saves",
+                "jesus loves you",
+                "christian content",
+                "faith",
+                "blessed",
             ]
         
         # 1. Run main warmup with keywords
@@ -1156,7 +1158,7 @@ class GeeLarkClient:
                     task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
                     variables=comment_variables,
                     schedule_at=comment_start,
-                    plan_name="Teamwork Comments"
+                    plan_name="JesusAI Comments"
                 )
                 results["comment_task"] = comment_response.data
                 logger.info(f"Comments chained: {comment_response.data}")
@@ -1180,7 +1182,7 @@ class GeeLarkClient:
                     task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
                     variables=like_variables,
                     schedule_at=like_start,
-                    plan_name="Teamwork Video Likes"
+                    plan_name="JesusAI Video Likes"
                 )
                 results["like_task"] = like_response.data
                 logger.info(f"Video likes chained: {like_response.data}")
@@ -1207,7 +1209,7 @@ class GeeLarkClient:
                     task_type=self.TASK_TYPES["TIKTOK_AI_WARMUP"],
                     variables=comment_like_variables,
                     schedule_at=comment_like_start,
-                    plan_name="Teamwork Comment Likes"
+                    plan_name="JesusAI Comment Likes"
                 )
                 results["comment_like_task"] = comment_like_response.data
                 logger.info(f"Comment likes chained: {comment_like_response.data}")

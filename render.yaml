@@ -16,6 +16,15 @@ services:
         sync: false
       - key: GEELARK_API_BASE_URL
         value: https://openapi.geelark.com/open/v1
+      # Kie.ai for JesusAI video generation (Nano Banana Pro + Kling 2.6)
+      - key: KIE_API_KEY
+        sync: false
+      # Optional: Anthropic for dynamic prompt variation (falls back to JSON templates)
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # "kling" (default, ~$0.10 video) or "hailuo" (~$0.15 video)
+      - key: JESUSAI_VIDEO_MODEL
+        value: kling
       - key: DATABASE_URL
         fromDatabase:
           name: tiktok-db
@@ -25,7 +34,7 @@ services:
       - key: DEBUG
         value: "false"
       - key: WARMUP_DAYS
-        value: "5"
+        value: "7"
       - key: VIDEO_STORAGE_PATH
         value: ./data/videos
 

@@ -44,16 +44,23 @@ class Settings(BaseSettings):
     
     # Database
     database_url: str = "sqlite:///./data/tiktok_automation.db"
-    
+
+    # AI Generation (Kie.ai for Nano Banana Pro + Kling/Hailuo)
+    kie_api_key: str = ""
+
+    # Optional: Anthropic for dynamic prompt variation (falls back to JSON templates if absent)
+    anthropic_api_key: str = ""
+
     # App Settings
     log_level: str = "INFO"
     debug: bool = False
-    
-    # Automation Settings
-    warmup_days: int = 5
-    min_actions_per_day: int = 20
-    max_actions_per_day: int = 50
-    video_posts_per_day: int = 2
+
+    # Automation Settings (TAP method)
+    # warmup_days kept for legacy compatibility — TAP is lifecycle-driven via warmup_day field
+    warmup_days: int = 7
+    min_actions_per_day: int = 1   # TAP: 1-3 light actions max during early warmup
+    max_actions_per_day: int = 3
+    video_posts_per_day: int = 1   # Starts at 1, scales every 3 days, capped at 4
     min_delay_seconds: int = 30
     max_delay_seconds: int = 120
     
