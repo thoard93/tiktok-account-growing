@@ -27,6 +27,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
+from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -154,10 +155,18 @@ class AutomationScheduler:
     def __init__(self, phone_client=None):
         self.settings = get_settings()
         self.phone_client = phone_client or get_phone_client()
-        self.scheduler = BackgroundScheduler()
+        # Default APScheduler pool is 10 threads; bump to 20 since the API
+        # service has 2GB RAM and we run multiple concurrent kie.ai polls
+        # plus parallel warmup buckets and the auto-stop callback jobs.
+        try:
+            pool_size = int(os.getenv("APSCHEDULER_THREAD_POOL", "20"))
+        except ValueError:
+            pool_size = 20
+        executors = {"default": APSThreadPoolExecutor(max_workers=pool_size)}
+        self.scheduler = BackgroundScheduler(executors=executors)
         self._running = False
         self._active_warmup_phones: List[str] = []
-        logger.info("AutomationScheduler (TAP method) initialized")
+        logger.info(f"AutomationScheduler (TAP method) initialized — pool={pool_size}")
 
     # ---- DB helpers --------------------------------------------------------
 

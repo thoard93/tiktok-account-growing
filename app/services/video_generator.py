@@ -685,57 +685,116 @@ class VideoGenerator:
         )
 
     # -------------------------------------------------------------------------
-    # Batch helpers
+    # Batch helpers (parallel — Kie.ai jobs are I/O-bound so threads work well)
     # -------------------------------------------------------------------------
+
+    @staticmethod
+    def _max_workers() -> int:
+        """Read JESUSAI_MAX_PARALLEL_VIDEOS env var, default 5, cap at 16."""
+        try:
+            n = int(os.getenv("JESUSAI_MAX_PARALLEL_VIDEOS", "5"))
+        except ValueError:
+            n = 5
+        return max(1, min(n, 16))
 
     def generate_batch(
         self,
         count: int = 1,
         mode: str = "realistic",
+        max_workers: Optional[int] = None,
     ) -> List[GeneratedVideo]:
-        """Generate `count` videos with random competitions."""
-        results: List[GeneratedVideo] = []
-        for i in range(count):
-            logger.info(f"Batch progress: {i + 1}/{count}")
-            results.append(self.generate_jesusai_video(mode=mode))
-        return results
+        """
+        Generate `count` videos with random competitions, run in parallel.
+
+        Each generation is ~30-60s (image + video + ffmpeg). With 5 workers,
+        a batch of 10 takes ~2 min instead of ~10 min sequential.
+        """
+        if count <= 0:
+            return []
+
+        # Pick competitions in the main thread to avoid races on _used_competitions
+        comps = [self.pick_competition() for _ in range(count)]
+        workers = min(count, max_workers or self._max_workers())
+        logger.info(f"Generating batch of {count} with {workers} workers")
+
+        import concurrent.futures
+        results: List[Optional[GeneratedVideo]] = [None] * count
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {
+                ex.submit(self.generate_jesusai_video, competition=c["name"], mode=mode): i
+                for i, c in enumerate(comps)
+            }
+            for f in concurrent.futures.as_completed(futures):
+                idx = futures[f]
+                try:
+                    results[idx] = f.result()
+                except Exception as e:
+                    logger.error(f"Batch slot {idx} crashed: {e}")
+                    results[idx] = GeneratedVideo(success=False, error=str(e))
+        return [r for r in results if r is not None]
 
     def generate_batch_for_account(
         self,
         count: int = 1,
         mode: str = "realistic",
+        max_workers: Optional[int] = None,
     ) -> List[GeneratedVideo]:
         """
         Generate `count` videos for an account.
 
-        Reuses the same base image across the batch by generating one image then
-        animating it `count` times with different motion seeds. Cuts cost from
-        $0.22*N to $0.12 + $0.10*N (image generated once).
+        Step 1: generate one video synchronously to produce the base image
+                ($0.12 image gen + $0.10 video gen).
+        Step 2: animate the same image (count-1) times in parallel — each
+                additional video only costs $0.10 since image is reused.
+
+        Cuts cost from $0.22*N to $0.12 + $0.10*N AND wall-time from
+        ~30s*N to ~30s + max(animation_time_in_parallel).
         """
         if count <= 0:
             return []
 
         comp = self.pick_competition()
-        # First video — generates the image
+        # First video — generates the base image (sync; everything else needs it)
         first = self.generate_jesusai_video(competition=comp["name"], mode=mode)
         results: List[GeneratedVideo] = [first]
 
-        if not first.success or not first.image_url:
-            # Image gen failed; fall back to independent generations for the rest
-            for _ in range(count - 1):
-                results.append(self.generate_jesusai_video(mode=mode))
+        if count == 1:
             return results
 
-        # Reuse image for remaining videos
-        for i in range(count - 1):
-            logger.info(f"Reusing base image for video {i + 2}/{count}...")
-            results.append(
-                self.generate_jesusai_video(
+        if not first.success or not first.image_url:
+            # Image gen failed; fall back to independent parallel generations
+            logger.warning("Base image gen failed — running rest as independent jobs")
+            extra = self.generate_batch(
+                count=count - 1, mode=mode, max_workers=max_workers,
+            )
+            results.extend(extra)
+            return results
+
+        # Reuse image for remaining videos — animate in parallel
+        workers = min(count - 1, max_workers or self._max_workers())
+        logger.info(f"Reusing base image for {count - 1} more videos with {workers} workers")
+
+        import concurrent.futures
+        rest: List[Optional[GeneratedVideo]] = [None] * (count - 1)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = {
+                ex.submit(
+                    self.generate_jesusai_video,
                     competition=comp["name"],
                     mode=mode,
                     image_url=first.image_url,
-                )
-            )
+                ): i
+                for i in range(count - 1)
+            }
+            for f in concurrent.futures.as_completed(futures):
+                idx = futures[f]
+                try:
+                    rest[idx] = f.result()
+                except Exception as e:
+                    logger.error(f"Reuse slot {idx} crashed: {e}")
+                    rest[idx] = GeneratedVideo(success=False, error=str(e))
+
+        results.extend(r for r in rest if r is not None)
         return results
 
     # -------------------------------------------------------------------------

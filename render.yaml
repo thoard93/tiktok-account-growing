@@ -25,6 +25,12 @@ services:
       # "kling" (default, ~$0.10 video) or "hailuo" (~$0.15 video)
       - key: JESUSAI_VIDEO_MODEL
         value: kling
+      # Max parallel video generation workers (Standard 2GB plan can handle 8+)
+      - key: JESUSAI_MAX_PARALLEL_VIDEOS
+        value: "8"
+      # APScheduler internal thread pool (bumped from default 10)
+      - key: APSCHEDULER_THREAD_POOL
+        value: "20"
       - key: DATABASE_URL
         fromDatabase:
           name: tiktok-db

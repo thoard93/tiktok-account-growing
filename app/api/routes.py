@@ -1231,7 +1231,15 @@ def _run_video_generation_job(job_id: str, count: int, competition: str, mode: s
                 from app.services.video_generator import GeneratedVideo
                 return GeneratedVideo(success=False, error=str(e))
                 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(count, 5)) as executor:
+        try:
+            max_parallel = int(os.getenv("JESUSAI_MAX_PARALLEL_VIDEOS", "5"))
+        except ValueError:
+            max_parallel = 5
+        max_parallel = max(1, min(max_parallel, 16))
+        workers = min(count, max_parallel)
+        logger.info(f"[Job {job_id}] Using {workers} parallel workers (max={max_parallel})")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(_generate_single, i) for i in range(count)]
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
