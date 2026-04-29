@@ -54,8 +54,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.0"
+      # NOTE: Override this in the Render dashboard UI to match your actual
+      # API service URL (Render may append a suffix like "-4o6b" to the
+      # hostname if the bare name was taken). The value below is just the
+      # default and will be wrong if your API service has a suffix.
       - key: API_BASE_URL
-        value: https://tiktok-automation-api.onrender.com/api
+        value: https://tiktok-automation-api-4o6b.onrender.com/api
 
 databases:
   - name: tiktok-db
