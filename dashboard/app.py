@@ -230,31 +230,59 @@ st.markdown("""
 
 
 # ===========================
-# API Helpers
+# API Helpers (with response caching)
 # ===========================
+#
+# Streamlit re-runs the whole script top-to-bottom on every interaction
+# (tab switch, button click, input change). Without caching, a single
+# tab switch on the Dashboard page fires 4 sequential API calls. With
+# @st.cache_data(ttl=10), repeated switches reuse the response for 10s
+# and feel instant. Mutations (POST/DELETE) clear the cache so the next
+# read sees the fresh state.
 
+@st.cache_resource
+def _api_session():
+    """Single requests.Session reused across calls — keeps TCP connection alive."""
+    s = requests.Session()
+    s.headers.update({"Accept": "application/json"})
+    return s
+
+
+@st.cache_data(ttl=10, show_spinner=False)
 def api_get(endpoint):
     try:
-        resp = requests.get(f"{API_BASE_URL}{endpoint}", timeout=15)
+        resp = _api_session().get(f"{API_BASE_URL}{endpoint}", timeout=15)
         if resp.status_code == 200:
             return resp.json()
         return None
     except Exception:
         return None
+
+
+def _invalidate_cache():
+    """Drop the api_get response cache after a mutation."""
+    try:
+        api_get.clear()
+    except Exception:
+        pass
+
 
 def api_post(endpoint, data=None):
     try:
-        resp = requests.post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=30)
+        resp = _api_session().post(f"{API_BASE_URL}{endpoint}", json=data or {}, timeout=30)
         if resp.status_code == 200:
+            _invalidate_cache()
             return resp.json()
         return None
     except Exception:
         return None
 
+
 def api_delete(endpoint):
     try:
-        resp = requests.delete(f"{API_BASE_URL}{endpoint}", timeout=10)
+        resp = _api_session().delete(f"{API_BASE_URL}{endpoint}", timeout=10)
         if resp.status_code == 200:
+            _invalidate_cache()
             return resp.json()
         return None
     except Exception:
@@ -305,6 +333,10 @@ page = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
+if st.sidebar.button("🔄 Refresh data", use_container_width=True, help="Drop cached API responses"):
+    _invalidate_cache()
+    st.rerun()
+
 st.sidebar.markdown(
     f"<small style='color: #a8a4b8;'>v3.0 · TAP method · <a href='{API_BASE_URL.replace('/api', '')}' "
     f"style='color: #d4a64a;'>API</a></small>",
