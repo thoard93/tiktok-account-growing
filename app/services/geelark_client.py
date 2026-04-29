@@ -163,11 +163,24 @@ class GeeLarkClient:
         self.api_key = api_key
         self.timeout = timeout
         
-        # Validate auth credentials
+        # Validate auth credentials with diagnostic detail (lengths only — no secrets)
         if self.auth_method == "TOKEN" and not self.app_token:
-            raise ValueError("app_token required for TOKEN auth method")
-        if self.auth_method == "KEY" and (not self.app_id or not self.api_key):
-            raise ValueError("app_id and api_key required for KEY auth method")
+            raise ValueError(
+                "TOKEN auth selected but GEELARK_APP_TOKEN is empty. "
+                "Set GEELARK_APP_TOKEN env var or switch GEELARK_AUTH_METHOD to KEY."
+            )
+        if self.auth_method == "KEY":
+            missing = []
+            if not self.app_id:
+                missing.append("GEELARK_APP_ID")
+            if not self.api_key:
+                missing.append("GEELARK_API_KEY")
+            if missing:
+                raise ValueError(
+                    f"KEY auth selected but env var(s) empty: {', '.join(missing)}. "
+                    f"Got app_id_len={len(self.app_id or '')}, api_key_len={len(self.api_key or '')}. "
+                    "Check spelling in Render env vars (no spaces, exact case)."
+                )
         
         # Setup session with retry logic
         self.session = requests.Session()
