@@ -1,32 +1,27 @@
-# TikTok Sound Assets
+# JesusAI Sound Library
 
-Place your TikTok trend sounds here for FFmpeg to mux into generated videos.
+Drop trending TikTok audio files here. Each generated JesusAI video gets a
+random sound from this folder muxed in by FFmpeg.
 
-## Required File
+## Where to put files
 
-- **teamwork_trend.mp3** - The teamwork trend sound (download from TikTok downloader site)
+- `assets/sounds/trending/` — primary location for trending sounds (uploaded
+  via the dashboard's **🎵 Sounds** tab go here automatically).
+- `assets/sounds/` — also scanned recursively, so any subfolder works.
 
-## How to Get the Sound
+## Supported formats
 
-1. Find a TikTok using the teamwork trend sound
+- `.mp3`, `.wav`, `.m4a`, `.ogg`
+- Any duration (FFmpeg auto-crops to video length, default 5-6s)
+- 128kbps+ recommended
+
+## How to get a trending sound
+
+1. Find a TikTok using the audio you want
 2. Copy the video URL
-3. Go to ssstik.io or tiktokio.com
-4. Paste URL, select "Audio only" or MP3
-5. Download and rename to `teamwork_trend.mp3`
-6. Place in this folder
-7. Git add/commit/push
+3. Use ssstik.io or tiktokio.com → "Audio only" / MP3
+4. Drop the file in via the **🎵 Sounds** tab in the dashboard, or place it
+   in `assets/sounds/trending/` directly.
 
-## File Requirements
-
-- Format: MP3 (AAC also works)
-- Duration: Any length (FFmpeg auto-crops to video length)
-- Quality: 128kbps+ recommended
-
-## Multiple Sounds
-
-You can add multiple sound files and modify `video_generator.py` to randomly select:
-
-```python
-sounds = ["teamwork_trend.mp3", "motivation_beat.mp3", "inspiring_music.mp3"]
-sound_path = base_path / "assets" / "sounds" / random.choice(sounds)
-```
+The first available file is picked randomly per generation. No manual
+configuration needed.

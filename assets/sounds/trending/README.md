@@ -13,4 +13,4 @@ The video generator will randomly pick one for each video.
 
 - Keep files short (8-15 seconds) — they get cropped to match video length
 - Variety is good — the system picks randomly for each video
-- If this folder is empty, it falls back to `teamwork_trend.mp3`
+- If this folder is empty, the parent `assets/sounds/` folder is also scanned. If still empty, the video is rendered without audio.

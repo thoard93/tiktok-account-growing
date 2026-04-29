@@ -1,670 +1,355 @@
 """
-Teamwork Trend Video Generator v4.0
+JesusAI Video Generator
+=======================
+Generates "Jesus vs Devil" competition videos for TikTok account growth.
 
-Full pipeline:
-1. JSON-structured prompt → Nano Banana Pro 1K creates ultra-realistic 9:16 image
-2. Hailuo 2.3 Standard converts to 6s 768P video
-3. FFmpeg adds centered text overlay
-4. FFmpeg adds random trending sound/music
-5. FFmpeg strips metadata (removes AI fingerprints)
+Pipeline:
+  1. Pick competition (random or specified) + mode (realistic | cartoon)
+  2. Nano Banana Pro 2K  -> 9:16 still image of Jesus + Devil competing
+  3. Kling 2.6 (default) or Hailuo 2.3 -> animates the still into a 5-6s clip
+  4. FFmpeg adds SEO-word "swipe" text overlay (per TAP method)
+  5. FFmpeg adds trending sound (user-supplied via assets/sounds/)
+  6. FFmpeg strips metadata (removes AI fingerprint)
 
-Image reuse: 1 base image → 3 videos per account via varied motion prompts.
-Cost: ~$0.18/video avg (was $0.26).
+Cost: ~$0.22/video (Nano Banana Pro 2K $0.12 + Kling 2.6 $0.10).
+
+Requires KIE_API_KEY env var. Falls back to template prompts if ANTHROPIC_API_KEY is absent.
 """
 
+import json
+import logging
 import os
 import random
 import subprocess
-import logging
-import json
 import time
-from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional
 
-from .kie_client import get_kie_client, KieTaskResult
+from .kie_client import get_kie_client
 
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Public types & constants
+# =============================================================================
+
 @dataclass
 class GeneratedVideo:
-    """Result of video generation pipeline"""
     success: bool
     video_path: Optional[str] = None
     image_url: Optional[str] = None
     video_url: Optional[str] = None
+    competition: Optional[str] = None
+    mode: Optional[str] = None
     prompt_used: Optional[str] = None
     text_overlay: Optional[str] = None
     error: Optional[str] = None
     cost_usd: float = 0.0
 
 
-# ===========================
-# Teamwork Content Variations
-# ===========================
+# Hashtag set — primary JesusAI tags per user direction
+HASHTAGS = "#jesus #jesussaves #jesuslovesyou #fyp #foryou #christian"
 
-# Ultra-realistic JSON prompt templates for Nano Banana Pro
-# Each scene is POV walking through nature/city — structured for maximum photorealism
-JSON_PROMPT_TEMPLATES = [
-    # 1. Beach golden hour
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "Sony A7IV",
-            "lens": "35mm prime",
-            "aspect_ratio": "9:16",
-            "style": "golden hour natural light, DSLR realism, Kodak Portra 400 film look"
-        },
-        "scene": {
-            "concept": "first-person POV walking along a pristine sandy beach at golden hour",
-            "location": "wide sandy beach with gentle waves",
-            "time": "golden hour, 30 minutes before sunset"
-        },
-        "environment": {
-            "foreground": ["wet sand with gentle footprint impressions", "foam from receding waves"],
-            "midground": ["a jogger running along the waterline in the distance", "seagulls scattered on the sand"],
-            "background": ["warm orange-pink sunset over the ocean horizon", "distant headland silhouette"],
-            "atmosphere": "salt air haze, warm golden light wrapping around everything"
-        },
-        "camera": {
-            "shot_type": "first-person POV looking forward at the horizon",
-            "aperture": "f/2.8",
-            "depth_of_field": "shallow, background softly blurred",
-            "perspective": "natural walking height, eye level"
-        },
-        "lighting": {
-            "type": "golden hour natural sunlight",
-            "direction": "low angle side-backlighting from the left",
-            "quality": "warm, soft, with gentle lens flare",
-            "shadows": "long and soft on the sand"
-        },
-        "colors_and_tone": {
-            "palette": "warm golden sand, coral sunset sky, turquoise water, natural skin tones",
-            "contrast": "medium, film-like",
-            "saturation": "natural, slightly warm"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "sand grains, water surface, natural light scatter",
-            "noise": "subtle ISO grain consistent with golden hour photography"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "plastic skin", "oversaturated", "HDR", "feet visible", "legs visible", "selfie", "wide angle distortion"]
-        }
-    },
-    # 2. Forest trail
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "Canon R5",
-            "lens": "35mm f/1.8",
-            "aspect_ratio": "9:16",
-            "style": "volumetric forest light, natural film grain, cinematic depth"
-        },
-        "scene": {
-            "concept": "first-person POV peaceful walk through a lush forest trail",
-            "location": "dense green forest with tall pines and ferns",
-            "time": "late morning, dappled sunlight"
-        },
-        "environment": {
-            "foreground": ["dirt path with exposed tree roots", "fern fronds at the edges"],
-            "midground": ["a hiker with backpack walking ahead on the trail", "fallen moss-covered log"],
-            "background": ["towering pine trees creating a natural canopy", "volumetric light rays filtering through branches"],
-            "atmosphere": "misty morning air, earthy smell, peaceful silence"
-        },
-        "camera": {
-            "shot_type": "first-person POV looking forward down the trail",
-            "aperture": "f/2.8",
-            "depth_of_field": "shallow with creamy bokeh background",
-            "perspective": "natural walking eye level"
-        },
-        "lighting": {
-            "type": "dappled forest sunlight, volumetric rays",
-            "direction": "overhead filtered through canopy, backlighting the path",
-            "quality": "soft with dramatic god rays",
-            "shadows": "complex dappled patterns on the forest floor"
-        },
-        "colors_and_tone": {
-            "palette": "rich earthy greens, warm brown bark, golden light shafts, cool shadow tones",
-            "contrast": "high in light shafts, soft in shadows",
-            "saturation": "natural with lush greens"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "bark texture, moss detail, leaf veins, dirt path",
-            "noise": "subtle natural grain"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion"]
-        }
-    },
-    # 3. City park autumn
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "Sony A7IV",
-            "lens": "50mm prime",
-            "aspect_ratio": "9:16",
-            "style": "autumn warmth, soft backlight, cinematic color grading"
-        },
-        "scene": {
-            "concept": "first-person POV leisurely stroll through a city park in peak autumn",
-            "location": "urban park lined with mature maple and oak trees",
-            "time": "late afternoon, warm autumn light"
-        },
-        "environment": {
-            "foreground": ["cobblestone walking path covered in fallen golden leaves"],
-            "midground": ["a couple walking their golden retriever ahead", "park bench with someone reading"],
-            "background": ["row of trees with fiery orange-red canopy", "soft city skyline visible through branches"],
-            "atmosphere": "crisp autumn air, golden leaves gently falling, warm afternoon glow"
-        },
-        "camera": {
-            "shot_type": "first-person POV walking forward through the park",
-            "aperture": "f/2.0",
-            "depth_of_field": "shallow, people and trees softly blurred",
-            "perspective": "natural eye level"
-        },
-        "lighting": {
-            "type": "warm autumn afternoon sunlight",
-            "direction": "low-angle backlighting through the trees",
-            "quality": "soft golden, with gentle lens flare through leaves",
-            "shadows": "long and warm on the path"
-        },
-        "colors_and_tone": {
-            "palette": "golden amber, burnt orange, russet red, warm brown, soft green",
-            "contrast": "medium-warm",
-            "saturation": "rich but natural autumn tones"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "individual leaf detail, cobblestone texture, bark patterns",
-            "noise": "subtle film grain, Kodak Portra warmth"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion"]
-        }
-    },
-    # 4. European cobblestone street
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "Fujifilm X-T5",
-            "lens": "23mm f/2.0",
-            "aspect_ratio": "9:16",
-            "style": "European travel photography, warm ambient lighting, film grain"
-        },
-        "scene": {
-            "concept": "first-person POV evening walk through a charming European cobblestone street",
-            "location": "narrow old-town street in southern Europe with stone buildings",
-            "time": "blue hour, just after sunset"
-        },
-        "environment": {
-            "foreground": ["worn cobblestone street glistening slightly from recent rain"],
-            "midground": ["warm outdoor café tables with candles", "locals chatting at a small bistro"],
-            "background": ["old stone buildings with colorful shutters", "warm string lights draped between buildings", "church bell tower silhouetted against blue-purple sky"],
-            "atmosphere": "romantic evening ambiance, warm café glow against cool twilight sky"
-        },
-        "camera": {
-            "shot_type": "first-person POV walking forward down the narrow street",
-            "aperture": "f/2.0",
-            "depth_of_field": "medium, string lights creating beautiful bokeh",
-            "perspective": "natural walking height"
-        },
-        "lighting": {
-            "type": "mixed warm café light and cool twilight",
-            "direction": "warm point-source lights from cafés and string lights",
-            "quality": "cozy warm interior glow contrasting with blue hour sky",
-            "shadows": "soft deep shadows in doorways and alleys"
-        },
-        "colors_and_tone": {
-            "palette": "warm amber from lights, cool blue-purple sky, stone beige, terracotta",
-            "contrast": "medium-high for drama",
-            "saturation": "rich but natural"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "wet cobblestone reflections, stone wall texture, candlelight flicker",
-            "noise": "moderate film grain consistent with low-light shooting"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion", "neon signs"]
-        }
-    },
-    # 5. Mountain trail sunrise
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "Nikon Z8",
-            "lens": "24mm f/2.8",
-            "aspect_ratio": "9:16",
-            "style": "epic mountain landscape, sunrise drama, DSLR quality"
-        },
-        "scene": {
-            "concept": "first-person POV hiking a mountain trail at sunrise with breathtaking valley views",
-            "location": "alpine mountain trail with panoramic valley overlook",
-            "time": "sunrise, first golden light hitting the peaks"
-        },
-        "environment": {
-            "foreground": ["rocky dirt trail with alpine wildflowers at the edges"],
-            "midground": ["two hikers resting on a rocky outcrop ahead looking at the view"],
-            "background": ["misty valley below with layers of mountains fading into the distance", "warm golden sunrise light on the peaks"],
-            "atmosphere": "crisp mountain air, morning mist in the valley, epic scale"
-        },
-        "camera": {
-            "shot_type": "first-person POV looking forward along the trail toward the vista",
-            "aperture": "f/5.6",
-            "depth_of_field": "deep, landscape sharp from mid to background",
-            "perspective": "slightly elevated trail perspective"
-        },
-        "lighting": {
-            "type": "sunrise golden light",
-            "direction": "low angle from the right, raking across the mountains",
-            "quality": "warm dramatic with orange-golden tones",
-            "shadows": "deep valley shadows contrasting with lit peaks"
-        },
-        "colors_and_tone": {
-            "palette": "golden sunrise orange, deep blue shadows, green alpine meadow, misty grey valleys",
-            "contrast": "high dramatic",
-            "saturation": "vibrant but natural sunrise colors"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "rock surface, wildflower petals, distant mountain ridgelines",
-            "noise": "very subtle, clean landscape photography"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "selfie"]
-        }
-    },
-    # 6. Japanese garden
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "Sony A7C II",
-            "lens": "40mm f/2.5",
-            "aspect_ratio": "9:16",
-            "style": "serene zen atmosphere, soft morning light, natural tones"
-        },
-        "scene": {
-            "concept": "first-person POV gentle walk through a traditional Japanese garden",
-            "location": "manicured Japanese zen garden with stone paths and bamboo",
-            "time": "early morning, soft diffused light with subtle mist"
-        },
-        "environment": {
-            "foreground": ["stepping stones on raked white gravel", "manicured moss borders"],
-            "midground": ["arched wooden bridge over koi pond", "elderly couple admiring maple tree"],
-            "background": ["bamboo grove swaying gently", "traditional wooden pagoda partially visible"],
-            "atmosphere": "tranquil, meditative, morning dew on leaves, subtle fog"
-        },
-        "camera": {
-            "shot_type": "first-person POV looking forward along the garden path",
-            "aperture": "f/2.5",
-            "depth_of_field": "shallow, beautiful background separation",
-            "perspective": "natural walking height, slightly contemplative downward angle"
-        },
-        "lighting": {
-            "type": "soft diffused morning light with mist",
-            "direction": "ambient overhead with slight backlight through bamboo",
-            "quality": "ethereal, soft, zen-like",
-            "shadows": "gentle and soft everywhere"
-        },
-        "colors_and_tone": {
-            "palette": "jade green moss, white gravel, dark wood brown, soft pink blossoms, grey stone",
-            "contrast": "low-medium, peaceful",
-            "saturation": "muted and natural, wabi-sabi aesthetic"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "raked gravel patterns, moss texture, wood grain, water reflections",
-            "noise": "very subtle, clean"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "cherry blossom overload"]
-        }
-    },
-    # 7. Riverside sunset
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "Canon R6 II",
-            "lens": "35mm f/1.4",
-            "aspect_ratio": "9:16",
-            "style": "golden reflections, warm evening, natural film aesthetic"
-        },
-        "scene": {
-            "concept": "first-person POV calm walk along a quiet riverside path at sunset",
-            "location": "tree-lined river path with a wide peaceful river",
-            "time": "sunset, warm golden light reflecting off the water"
-        },
-        "environment": {
-            "foreground": ["gravel walking path with tall grass and wildflowers at the edges"],
-            "midground": ["fisherman sitting on the far bank", "wooden dock with a small rowboat"],
-            "background": ["golden sunset reflecting on the river surface", "willow trees draping into the water"],
-            "atmosphere": "peaceful end of day, warm breeze, birdsong"
-        },
-        "camera": {
-            "shot_type": "first-person POV looking forward along the river path",
-            "aperture": "f/2.0",
-            "depth_of_field": "shallow, river and trees beautifully blurred",
-            "perspective": "natural walking eye level"
-        },
-        "lighting": {
-            "type": "warm sunset light",
-            "direction": "low angle from ahead, golden backlight",
-            "quality": "rich warm golden with subtle lens flare",
-            "shadows": "long and warm stretching toward camera"
-        },
-        "colors_and_tone": {
-            "palette": "molten gold water reflections, warm green foliage, soft pink sky, earthy path",
-            "contrast": "medium, warm tones dominant",
-            "saturation": "rich golden but natural"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "water ripple reflections, grass detail, gravel texture",
-            "noise": "subtle warm film grain"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible"]
-        }
-    },
-    # 8. Tropical path
-    {
-        "meta": {
-            "quality": "ultra photorealistic",
-            "resolution": "8k",
-            "camera": "iPhone 15 Pro Max",
-            "lens": "24mm wide",
-            "aspect_ratio": "9:16",
-            "style": "tropical paradise, vivid natural colors, iPhone realism"
-        },
-        "scene": {
-            "concept": "first-person POV walking through a lush tropical jungle path toward the ocean",
-            "location": "tropical island path with palm trees and exotic vegetation",
-            "time": "mid-morning, bright dappled tropical light"
-        },
-        "environment": {
-            "foreground": ["sandy wooden boardwalk path through dense tropical plants"],
-            "midground": ["palm fronds arching over the path", "bright tropical flowers"],
-            "background": ["glimpse of turquoise ocean through the vegetation", "bright blue sky with white clouds"],
-            "atmosphere": "humid tropical air, bright vibrant colors, paradise feeling"
-        },
-        "camera": {
-            "shot_type": "first-person POV walking forward toward the ocean",
-            "aperture": "f/1.8",
-            "depth_of_field": "shallow, tropical plants creating natural frame",
-            "perspective": "natural walking height"
-        },
-        "lighting": {
-            "type": "bright tropical sunlight filtered through canopy",
-            "direction": "overhead with dappled patterns",
-            "quality": "bright and vivid with natural shadows",
-            "shadows": "sharp dappled leaf shadows on the boardwalk"
-        },
-        "colors_and_tone": {
-            "palette": "vivid tropical green, turquoise ocean, white sand, bright flower colors",
-            "contrast": "high, vivid tropical",
-            "saturation": "vibrant but natural tropical vibrancy"
-        },
-        "quality_and_technical_details": {
-            "resolution": "masterpiece, extremely detailed",
-            "texture_focus": "palm bark, tropical leaf veins, wooden boardwalk grain",
-            "noise": "minimal, clean bright photography"
-        },
-        "negative_prompt": {
-            "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "tourists"]
-        }
-    },
-]
-
-# Simple text fallback templates (used when Claude is unavailable)
-IMAGE_PROMPT_TEMPLATES = [
-    "Photorealistic POV walking through a sun-dappled city park, golden afternoon light filtering through cherry blossom trees, a couple walking their dog in the distance, shallow depth of field, warm tones, cinematic",
-    "Hyper-realistic POV stroll along a pristine sandy beach at golden hour, soft warm sunlight with lens flare, a jogger running far ahead on the shoreline, gentle ocean waves, natural film grain",
-    "Ultra-realistic POV peaceful walk through a lush forest trail, volumetric light rays through tall pine trees, a hiker with a backpack visible far ahead, rich earthy greens, shallow depth of field",
-    "Photorealistic POV relaxed stroll through autumn woods, golden maple leaves falling, a person walking their golden retriever far ahead on the trail, warm soft backlight, natural film grain",
-]
-
-# Text overlays for videos — Loom-style multi-line format
-# Each entry is repeated 8x in a vertical column covering the screen
-TEXT_OVERLAY_LINES = [
-    "Moot me",
-    "Teamwork trend",
-    "Moot me up",
-    "Teamwork ifb",
-]
-
-# Captions for TikTok posts — teamwork hashtags
 CAPTIONS = [
-    "#teamwork #teamworktrend #teamworkchallenge #teamwork1minago #teamwork1hourago",
-    "#teamwork #teamworktrend #teamworkchallenge #fyp",
-    "#teamwork #teamworkchallenge #teamwork1minago #teamwork1hourago",
-    "#teamworktrend #teamworkchallenge #teamwork #fyp",
+    "Follow me, I'll follow back 🙏",
+    "F4F let's grow together 🙏",
+    "Jesus loves you ❤️",
+    "Support to support 🙏",
+    "Follow back? 🙏 #jesus",
+    "Like for like 🙏 #jesussaves",
+    "Drop a 🙏 if you ride with Jesus",
+    "Mutuals only 🙏",
+    "🙏🙏🙏 #jesuslovesyou",
+    "I follow back fast 🙏 #f4f",
 ]
 
-# Hashtags — teamwork format
-HASHTAGS = "#teamwork #teamworktrend #teamworkchallenge #teamwork1minago #teamwork1hourago"
 
-# Varied motion prompts for Hailuo 2.3 — each creates a DIFFERENT video from the same base image
-# Using diverse walking styles, camera movements, and environmental interactions
-HAILUO_MOTION_PROMPTS = [
-    "Slow, steady forward walking POV, gentle rhythmic camera sway, warm sunlight shifting on the ground, peaceful natural pace, immersive first-person perspective",
-    "Medium pace walking forward, subtle handheld camera feel, light breeze moving nearby foliage, natural head-bob motion, birds flying across the sky",
-    "Relaxed contemplative walk forward, smooth cinematic glide, slight left-to-right looking around motion, sun flare gently shifting, ambient dust particles floating",
-    "Brisk morning walk forward through the scene, energetic camera movement, light bouncing dynamically, leaves rustling from the walking breeze",
-    "Ultra-smooth steadicam forward walk, dreamy slow motion feeling, subtle focus pull from foreground to background, golden light dancing",
-    "Natural casual stroll forward, gentle camera tilt looking up at the sky briefly then back forward, clouds slowly drifting, peaceful ambient motion",
-    "Slow meditative walk forward, camera gently drifting right to explore the scenery, soft wind blowing grass and flowers, serene atmosphere",
-    "Steady confident walk forward, dynamic camera with slight zoom-in effect, shadows lengthening, warm light intensifying",
-    "Gentle flowing forward motion, camera with slight S-curve path variation, light filtering through trees shifting patterns, magical atmosphere",
+# SEO words baked into every video as on-screen text (TAP method: "swipe off-screen so hidden")
+# Per the PDF: "Use the SEO words below in every video. Put them on screen, then swipe them off
+# screen so they're hidden. This helps boost engagement and keeps you away from violations."
+SEO_WORDS = [
+    "f4f", "follow for follow", "follow back", "fb", "fast", "moots", "mutuals",
+    "grow together", "support for support", "like for like", "l4l",
+    "engagement boost", "follower growth", "TikTok growth", "gain followers",
+    "grow your account", "better together", "squad goals",
+    "jesus", "jesus saves", "jesus loves you", "christian content",
+    "faith", "blessed", "god is good", "pray for us", "christian growth",
 ]
 
-# =========================================
-# MASTER CLAUDE SYSTEM PROMPT (JSON OUTPUT)
-# =========================================
+# Single overlay phrases that scroll in the video — kept short for readability
+TEXT_OVERLAY_LINES = [
+    "Follow back 🙏",
+    "F4F",
+    "Mutuals 🙏",
+    "Like for like",
+    "Support to support",
+    "Follow for follow",
+    "Jesus loves you",
+    "🙏 mutuals 🙏",
+]
 
-CLAUDE_IMAGE_SYSTEM_PROMPT = """You are a world-class cinematographer specializing in ultra-photorealistic AI image generation using structured JSON prompts for Nano Banana Pro.
 
-You MUST output a valid JSON object controlling every aspect of the image. Follow this exact structure:
+# =============================================================================
+# Competition catalog (10 Jesus vs Devil scenes per JesusAI handover doc)
+# =============================================================================
+#
+# Schtick: Devil always wins (Jesus losing/struggling). Controversy drives
+# comments, duets, shares -> algorithm boost. This is intentional.
+#
+# Each entry: name, camera, action (motion prompt), and image hint.
 
-{
-  "meta": {
-    "quality": "ultra photorealistic",
-    "resolution": "8k",
-    "camera": "(real camera model)",
-    "lens": "(focal length and aperture)",
-    "aspect_ratio": "9:16",
-    "style": "(brief style description)"
-  },
-  "scene": {
-    "concept": "first-person POV walking through (specific scene)",
-    "location": "(detailed location)",
-    "time": "(time of day and lighting conditions)"
-  },
-  "environment": {
-    "foreground": ["(path/ground details)"],
-    "midground": ["(people, objects at medium distance)"],
-    "background": ["(distant scenery, sky)"],
-    "atmosphere": "(ambient description)"
-  },
-  "camera": {
-    "shot_type": "first-person POV looking forward",
-    "aperture": "(f-stop)",
-    "depth_of_field": "(description)",
-    "perspective": "natural walking height, eye level"
-  },
-  "lighting": {
-    "type": "(light source)",
-    "direction": "(from where)",
-    "quality": "(warm/cool, soft/hard)",
-    "shadows": "(shadow description)"
-  },
-  "colors_and_tone": {
-    "palette": "(specific colors)",
-    "contrast": "(level)",
-    "saturation": "(level and feel)"
-  },
-  "quality_and_technical_details": {
-    "resolution": "masterpiece, extremely detailed",
-    "texture_focus": "(what textures matter)",
-    "noise": "(film grain description)"
-  },
-  "negative_prompt": {
-    "forbidden_concepts": ["cartoon", "illustration", "3d render", "oversaturated", "feet visible", "legs visible", "wide angle distortion"]
-  }
-}
+COMPETITIONS = [
+    {
+        "name": "Arm Wrestling",
+        "camera": "side-view",
+        "action": "Devil pushing Jesus's arm down with effortless smug confidence; Jesus straining hard, sweat on brow, losing ground.",
+    },
+    {
+        "name": "Tug of War",
+        "camera": "side-view",
+        "action": "Devil pulling thick rope effortlessly; Jesus dug in heels, leaning back, slipping forward, robe whipping in the wind.",
+    },
+    {
+        "name": "Chess",
+        "camera": "side-view",
+        "action": "Devil smirking confidently with hand on chin over a chess board; Jesus stressed, hand on forehead, frowning at the position.",
+    },
+    {
+        "name": "Jogging",
+        "camera": "side-view",
+        "action": "Devil running with effortless smooth stride along a track; Jesus several paces behind, panting, sweating, falling behind.",
+    },
+    {
+        "name": "Swimming",
+        "camera": "front-facing",
+        "action": "Devil cutting through the pool with smooth powerful freestyle stroke; Jesus splashing wildly behind, struggling, head barely above water.",
+    },
+    {
+        "name": "Running",
+        "camera": "front-facing",
+        "action": "Devil crossing the finish line first with arms raised in triumph; Jesus several meters back, exhausted, hands on knees.",
+    },
+    {
+        "name": "Cycling",
+        "camera": "front-facing",
+        "action": "Devil pedaling effortlessly on a road bike, leaning into a curve; Jesus panting heavily on a bike trailing behind, legs burning.",
+    },
+    {
+        "name": "Kayak Racing",
+        "camera": "front-facing",
+        "action": "Devil paddling powerfully with a sleek kayak slicing through whitewater; Jesus splashing, kayak wobbling, falling behind in the rapids.",
+    },
+    {
+        "name": "Horseback Riding",
+        "camera": "front-facing",
+        "action": "Devil galloping ahead on a powerful black stallion, cape flowing; Jesus on a slower white horse trailing behind, holding on tight.",
+    },
+    {
+        "name": "Rock Climbing",
+        "camera": "dynamic",
+        "action": "Devil higher on the rock wall, climbing effortlessly with a smug grin; Jesus below, reaching up, struggling to find the next handhold.",
+    },
+]
 
-CRITICAL RULES:
-1. ALWAYS first-person walking POV looking FORWARD. NEVER show feet, legs, or body.
-2. ALWAYS include 1-3 people naturally in midground/background (pedestrians, joggers, couples, dog walkers)
-3. Use REAL camera models (Sony, Canon, Nikon, Fujifilm) and real lens specs
-4. VARY locations: beaches, forests, city parks, mountain trails, Japanese gardens, European streets, riverside paths, tropical paths, lavender fields, snowy trails, desert oases
-5. Make it indistinguishable from a real photograph
-6. Output ONLY the JSON, no explanation"""
 
+# =============================================================================
+# JSON prompt builder (Nano Banana Pro)
+# =============================================================================
+#
+# Uses the master JSON schema from the JESUSAI-HANDOVER ultra-realism guide.
+# Pretty-printed JSON improves the model's attention to each field.
+
+GLOBAL_REALISM = "Photorealistic. Shot on a smartphone. Real product footage."
+
+
+def build_jesusai_image_prompt(competition: dict, mode: str = "realistic") -> str:
+    """
+    Build a JSON-string prompt for Nano Banana Pro for a Jesus vs Devil scene.
+
+    Args:
+        competition: One of COMPETITIONS entries
+        mode: "realistic" (default) or "cartoon"
+
+    Returns:
+        JSON-formatted string ready to pass as the `prompt` field.
+    """
+    is_cartoon = mode == "cartoon"
+
+    # Subject — both characters specified, camera angle from competition
+    subject = {
+        "description": (
+            f"Jesus and the Devil competing in {competition['name'].lower()}. "
+            f"{competition['action']} "
+            "Both figures clearly visible in frame."
+        ),
+        "jesus": (
+            "Jesus Christ — long brown hair, full beard, white robe with red sash, "
+            "kind-but-stressed expression, glowing soft halo aura"
+        ),
+        "devil": (
+            "The Devil — red skin, two black horns, sharp goatee, smug confident grin, "
+            "black cloak, slight smoke wisps around him"
+        ),
+        "arrangement": "Jesus on the left, Devil on the right, both fully in frame",
+        "camera_angle": competition["camera"],
+    }
+
+    # Scene matched to the competition
+    scene = {
+        "environment": _scene_for(competition["name"]),
+        "depth": "natural depth of field, focus on the action between the two figures",
+        "environment_feel": "real, grounded, not a sterile studio set",
+    }
+
+    if is_cartoon:
+        image_type = "vibrant cartoon illustration, bold lines, expressive faces"
+        style = "Pixar-style 3D animated cartoon, exaggerated expressions"
+        realism = {
+            "overall": "stylized 3D cartoon — clean, expressive, family-friendly",
+            "textures": "smooth painted surfaces with cartoon shading",
+            "color_science": "vibrant saturated colors, slightly exaggerated",
+        }
+        negative = [
+            "photorealistic", "uncanny valley", "scary", "grotesque",
+            "garbled text", "warped faces",
+        ]
+    else:
+        image_type = "ultra-realistic cinematic photograph"
+        style = "photojournalism, candid, lifelike, editorial-but-real"
+        realism = {
+            "overall": GLOBAL_REALISM,
+            "textures": "natural skin texture with pores, real hair, fabric weave on robes",
+            "imperfections": "tiny dust particles in light, real human imperfections — NOT artificially perfect",
+            "color_science": "accurate white balance, warm natural tones",
+        }
+        negative = [
+            "studio backdrop", "white seamless background", "professional product photography",
+            "flat lighting", "harsh shadows", "blown highlights", "oversaturated colors",
+            "AI-generated look", "uncanny valley", "plastic skin", "garbled text",
+            "warped faces", "extra fingers", "melted hands",
+        ]
+
+    prompt_obj = {
+        "image_type": image_type,
+        "subject": subject,
+        "scene": scene,
+        "lighting": {
+            "type": "natural ambient light matched to the scene",
+            "quality": "soft, dramatic, cinematic",
+            "shadows": "natural soft shadows where bodies meet ground",
+        },
+        "composition": {
+            "framing": "9:16 vertical TikTok frame, both figures fully visible",
+            "rule_of_thirds": "Jesus left third, Devil right third, action in center",
+            "focus": "tack-sharp on both figures, environment naturally soft",
+        },
+        "camera": {
+            "device": "shot on iPhone 15 Pro Max" if not is_cartoon else "rendered cinematic camera",
+            "lens": "natural 1x lens, no fisheye",
+            "angle": competition["camera"],
+            "aspect_ratio": "9:16 vertical (TikTok native)",
+        },
+        "realism": realism,
+        "style": style,
+        "negative_prompt": negative,
+        "post_processing": "no filters, clean output",
+    }
+
+    return json.dumps(prompt_obj, indent=2)
+
+
+def _scene_for(competition_name: str) -> str:
+    """Pick an environment that fits the competition."""
+    mapping = {
+        "Arm Wrestling": "rustic wooden table in a softly-lit tavern interior",
+        "Tug of War": "open grassy field at golden hour with mountains in distance",
+        "Chess": "ornate marble chess table by a window, stained-glass light",
+        "Jogging": "outdoor running track at dawn, soft morning fog",
+        "Swimming": "Olympic swimming pool with crystal blue water, lane markers visible",
+        "Running": "outdoor sprint track with finish-line tape, stadium in soft background",
+        "Cycling": "winding asphalt road through countryside, golden hour",
+        "Kayak Racing": "whitewater rapids with churning blue-white water, forested banks",
+        "Horseback Riding": "open prairie with golden grass, dramatic cloudy sky",
+        "Rock Climbing": "tall rocky cliff face with handholds, sunset sky behind",
+    }
+    return mapping.get(competition_name, "dramatic outdoor setting")
+
+
+def build_jesusai_motion_prompt(competition: dict) -> str:
+    """Build the Kling/Hailuo motion prompt for the animation pass."""
+    return (
+        f"Animate this scene: {competition['action']} "
+        "Smooth realistic motion at 30fps, 5-second duration. "
+        "Camera holds steady — let the subjects' action drive the shot. "
+        "Maintain both characters' identity, costume, and proportions throughout."
+    )
+
+
+# =============================================================================
+# VideoGenerator — main pipeline
+# =============================================================================
 
 class VideoGenerator:
     """
-    Generates teamwork trend videos using AI.
-    
-    Pipeline v4: JSON prompt → Nano Banana Pro 1K (image) → Hailuo 2.3 Standard 6s 768P (video) → FFmpeg (overlay + sound)
-    Image reuse: 1 base image → 3 videos per account via varied motion prompts.
+    JesusAI video generator.
+
+    Pipeline:
+      Nano Banana Pro 2K (image) -> Kling 2.6 (video) -> FFmpeg overlay/sound/strip
+
+    Backwards-compatible: exposes generate_teamwork_video() as an alias to
+    generate_jesusai_video() so older callers keep working during transition.
     """
-    
+
+    DEFAULT_VIDEO_MODEL = os.getenv("JESUSAI_VIDEO_MODEL", "kling")  # "kling" | "hailuo"
+
     def __init__(self, output_dir: Optional[str] = None):
-        """Initialize video generator."""
         self.kie = get_kie_client()
-        # Strip whitespace from API key to prevent hidden char issues
-        raw_key = os.getenv("ANTHROPIC_API_KEY", "")
-        self.claude_api_key = raw_key.strip() if raw_key else None
-        
-        if self.claude_api_key:
-            logger.info(f"ANTHROPIC_API_KEY loaded: {self.claude_api_key[:20]}... (len={len(self.claude_api_key)})")
-        else:
-            logger.warning("ANTHROPIC_API_KEY not set - will use template prompts")
-        
-        # Output directory for generated videos — uses Render persistent disk if available
+
+        raw_anthropic = os.getenv("ANTHROPIC_API_KEY", "")
+        self.anthropic_api_key = raw_anthropic.strip() if raw_anthropic else None
+
         default_dir = "/var/data/generated_videos" if os.path.isdir("/var/data") else "./generated_videos"
         self.output_dir = Path(output_dir or os.getenv("VIDEO_OUTPUT_DIR", default_dir))
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Sound directories
+
         self.sounds_dir = Path(__file__).parent.parent.parent / "assets" / "sounds"
         self.trending_sounds_dir = self.sounds_dir / "trending"
         self.trending_sounds_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Track used stock clips to avoid reuse across accounts in same batch
-        self._used_clips: set = set()
-        
-        # Track used JSON templates to avoid repeats in same session
-        self._used_json_templates: set = set()
-        
-        logger.info(f"VideoGenerator v4 initialized (Hailuo 2.3 Standard 6s), output: {self.output_dir}")
-    
-    # ===========================
-    # Claude Prompt Generation
-    # ===========================
-    
-    def generate_image_prompt_with_claude(self, style_hint: Optional[str] = None) -> str:
-        """
-        Generate ultra-realistic image prompt using JSON-structured templates or Claude.
-        
-        Uses structured JSON prompts for Nano Banana Pro that control every aspect
-        of the image (camera, lighting, environment, etc.) for maximum photorealism.
-        
-        Args:
-            style_hint: Optional hint like "beach", "forest", "city"
-        
-        Returns:
-            JSON-formatted string prompt for Nano Banana Pro
-        """
-        # First try Claude for unique JSON prompts
-        if self.claude_api_key:
-            try:
-                import httpx
-                
-                user_message = "Generate a unique, ultra-photorealistic first-person POV walking scene as a JSON object. Make it feel like a real moment captured on a premium camera."
-                if style_hint:
-                    user_message += f" Location theme: {style_hint}"
-                user_message += " Include 1-3 people naturally in the background. Output ONLY the JSON."
-                
-                response = httpx.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "Content-Type": "application/json",
-                        "x-api-key": self.claude_api_key,
-                        "anthropic-version": "2023-06-01"
-                    },
-                    json={
-                        "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 800,
-                        "system": CLAUDE_IMAGE_SYSTEM_PROMPT,
-                        "messages": [{"role": "user", "content": user_message}]
-                    },
-                    timeout=30
-                )
-                response.raise_for_status()
-                
-                result = response.json()
-                prompt = result.get("content", [{}])[0].get("text", "").strip()
-                
-                # Validate it's valid JSON
-                try:
-                    json.loads(prompt)
-                    logger.info(f"Claude generated JSON prompt: {prompt[:120]}...")
-                    return prompt
-                except json.JSONDecodeError:
-                    logger.warning("Claude output was not valid JSON, falling back to template")
-                    
-            except Exception as e:
-                logger.warning(f"Claude prompt generation failed: {e}, using JSON template")
-        
-        # Fallback: use pre-built JSON templates
-        # Pick a template we haven't used recently
-        available = [i for i in range(len(JSON_PROMPT_TEMPLATES)) if i not in self._used_json_templates]
-        if not available:
-            self._used_json_templates.clear()
-            available = list(range(len(JSON_PROMPT_TEMPLATES)))
-        
-        # Filter by style hint if provided
-        if style_hint:
-            style_lower = style_hint.lower()
-            style_map = {
-                "beach": 0, "forest": 1, "park": 2, "autumn": 2, "city": 2,
-                "europe": 3, "cobblestone": 3, "mountain": 4, "japanese": 5,
-                "japan": 5, "river": 6, "tropical": 7, "jungle": 7
-            }
-            for key, idx in style_map.items():
-                if key in style_lower and idx in available:
-                    template_idx = idx
-                    break
-            else:
-                template_idx = random.choice(available)
-        else:
-            template_idx = random.choice(available)
-        
-        self._used_json_templates.add(template_idx)
-        template = JSON_PROMPT_TEMPLATES[template_idx]
-        prompt_str = json.dumps(template)
-        logger.info(f"Using JSON template #{template_idx + 1}: {template['scene']['concept'][:80]}...")
-        return prompt_str
-    
-    def generate_video_motion_prompt(self) -> str:
-        """Get a random Hailuo 2.3 motion prompt for varied video output."""
-        return random.choice(HAILUO_MOTION_PROMPTS)
-    
-    # ===========================
-    # FFmpeg Processing
-    # ===========================
-    
+
+        self._used_competitions: set = set()
+
+        logger.info(
+            f"JesusAI VideoGenerator initialized — video model: {self.DEFAULT_VIDEO_MODEL}, "
+            f"output: {self.output_dir}"
+        )
+
+    # -------------------------------------------------------------------------
+    # Pick / build prompt
+    # -------------------------------------------------------------------------
+
+    def pick_competition(self, requested: Optional[str] = None) -> dict:
+        """Pick a competition by name match (substring) or random not-recently-used."""
+        if requested:
+            req_lower = requested.lower()
+            for comp in COMPETITIONS:
+                if req_lower in comp["name"].lower():
+                    return comp
+
+        available_idx = [i for i in range(len(COMPETITIONS)) if i not in self._used_competitions]
+        if not available_idx:
+            self._used_competitions.clear()
+            available_idx = list(range(len(COMPETITIONS)))
+
+        idx = random.choice(available_idx)
+        self._used_competitions.add(idx)
+        return COMPETITIONS[idx]
+
+    # -------------------------------------------------------------------------
+    # FFmpeg helpers (kept from prior pipeline — proven, no JesusAI coupling)
+    # -------------------------------------------------------------------------
+
     def add_text_overlay(
         self,
         input_video_path: str,
@@ -674,40 +359,20 @@ class VideoGenerator:
         font_size: int = 42,
         font_color: str = "white",
         border_color: str = "black",
-        border_width: int = 3
+        border_width: int = 3,
     ) -> bool:
         """
-        Add Loom-style multi-line text overlay to video using FFmpeg.
-        
-        Repeats 'text_line' vertically 8 times in a column, covering ~60% of
-        the screen height. Bold white text with black outline, left-of-center.
-        Matches the proven growth strategy from the Loom walkthrough.
-        
-        Args:
-            input_video_path: Source video
-            output_video_path: Output with overlay
-            text_line: Single line to repeat (e.g. "Moot me")
-            repeat_count: How many times to repeat (default 8)
-            font_size: Font size in pixels (default 42 for 720p)
-            font_color: Text color
-            border_color: Outline color
-            border_width: Outline thickness
-        
-        Returns:
-            True if successful
+        Add stacked text overlay to a video. Per TAP method: SEO words on screen,
+        then swiped off — but at this stage we just stamp them; the "swipe" is
+        the natural reading flow of the stacked column.
         """
         try:
-            # Build stacked drawtext filters — one per line
-            # Video is 9:16 (720x1280), so height is 1280px
-            # 8 lines at font_size 42 with 12px spacing = 8 * 54 = 432px total
-            # Center vertically: start_y = (1280 - 432) / 2 ≈ 424
-            line_height = font_size + 12  # font + spacing
+            line_height = font_size + 12
             total_height = repeat_count * line_height
-            start_y = f"(h-{total_height})/2"  # dynamic centering
-            
-            # Escape single quotes in text for FFmpeg
-            safe_text = text_line.replace("'", "'\\\''")
-            
+            start_y = f"(h-{total_height})/2"
+
+            safe_text = text_line.replace("'", r"'\''")
+
             filters = []
             for i in range(repeat_count):
                 y_pos = f"{start_y}+{i * line_height}"
@@ -721,1274 +386,394 @@ class VideoGenerator:
                     f"y={y_pos}"
                 )
                 filters.append(drawtext)
-            
-            # Chain all drawtext filters with commas
-            vf_string = ",".join(filters)
-            
+
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_video_path,
-                "-vf", vf_string,
+                "-vf", ",".join(filters),
                 "-c:v", "libx264",
                 "-preset", "fast",
                 "-codec:a", "copy",
-                output_video_path
+                output_video_path,
             ]
-            
+
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            
             if result.returncode == 0:
-                logger.info(f"Multi-line text overlay added: '{text_line}' x{repeat_count}")
+                logger.info(f"Text overlay added: '{text_line}' x{repeat_count}")
                 return True
-            else:
-                logger.error(f"FFmpeg error: {result.stderr}")
-                return False
-                
+            logger.error(f"FFmpeg overlay error: {result.stderr[:300]}")
+            return False
         except FileNotFoundError:
-            logger.error("FFmpeg not found - text overlay skipped")
+            logger.error("FFmpeg not found — overlay skipped")
             return False
         except Exception as e:
             logger.error(f"Text overlay failed: {e}")
             return False
-    
+
     def strip_metadata(self, input_video_path: str, output_video_path: str) -> bool:
-        """
-        Strip all metadata from video to remove AI generation fingerprints.
-        
-        This helps videos appear more "original" and can help bypass
-        platform detection of AI-generated content.
-        
-        Args:
-            input_video_path: Source video
-            output_video_path: Output without metadata
-        
-        Returns:
-            True if successful
-        """
         try:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", input_video_path,
-                "-map_metadata", "-1",    # Strip all metadata
-                "-fflags", "+bitexact",   # Remove encoder signatures
+                "-map_metadata", "-1",
+                "-fflags", "+bitexact",
                 "-flags:v", "+bitexact",
                 "-flags:a", "+bitexact",
-                "-c:v", "libx264",        # Re-encode video
+                "-c:v", "libx264",
                 "-preset", "fast",
                 "-crf", "23",
-                "-c:a", "aac",            # Re-encode audio
+                "-c:a", "aac",
                 "-b:a", "128k",
-                output_video_path
+                output_video_path,
             ]
-            
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-            
             if result.returncode == 0:
-                logger.info("Metadata stripped successfully")
+                logger.info("Metadata stripped")
                 return True
-            else:
-                logger.error(f"Metadata strip error: {result.stderr[:200]}")
-                return False
-                
+            logger.error(f"Metadata strip error: {result.stderr[:300]}")
+            return False
         except FileNotFoundError:
-            logger.error("FFmpeg not found - metadata not stripped")
+            logger.error("FFmpeg not found — metadata not stripped")
             return False
         except Exception as e:
             logger.error(f"Metadata strip failed: {e}")
             return False
-    
-    # Search queries to rotate through for variety
-    SOUND_SEARCH_QUERIES = [
-        "upbeat pop music",
-        "trending beat",
-        "catchy melody loop",
-        "energetic hip hop beat",
-        "viral music tiktok",
-        "happy background music",
-        "motivational beat drop",
-        "modern trap beat",
-        "chill lofi beat",
-        "dance music electronic",
-        "acoustic guitar happy",
-        "piano emotional",
-        "cinematic inspiring music",
-        "funky groove beat",
-        "summer vibes music"
-    ]
-    
-    def _fetch_sounds_from_freesound(self, count: int = 5) -> int:
-        """
-        Fetch trending/popular sounds from Freesound.org and cache locally.
-        Uses preview-hq-mp3 URLs which don't require OAuth2.
-        
-        Args:
-            count: Number of sounds to fetch
-        
-        Returns:
-            Number of sounds successfully downloaded
-        """
-        import httpx
-        
-        api_key = os.getenv("FREESOUND_API_KEY")
-        if not api_key:
-            logger.warning("FREESOUND_API_KEY not set — cannot auto-fetch sounds")
-            return 0
-        
-        downloaded = 0
-        query = random.choice(self.SOUND_SEARCH_QUERIES)
-        
-        try:
-            # Search for music sounds, sorted by rating, filtered by duration
-            params = {
-                "query": query,
-                "token": api_key,
-                "fields": "id,name,previews,duration,avg_rating,num_downloads",
-                "filter": "duration:[5 TO 30]",  # 5-30 second clips
-                "sort": "rating_desc",
-                "page_size": 15
-            }
-            
-            logger.info(f"Fetching sounds from Freesound (query: '{query}')...")
-            
-            with httpx.Client(timeout=30) as client:
-                resp = client.get("https://freesound.org/apiv2/search/text/", params=params)
-                resp.raise_for_status()
-                data = resp.json()
-            
-            results = data.get("results", [])
-            if not results:
-                logger.warning(f"No Freesound results for query: {query}")
-                return 0
-            
-            # Pick random results from top-rated
-            selected = random.sample(results, min(count, len(results)))
-            
-            for sound in selected:
-                try:
-                    preview_url = sound.get("previews", {}).get("preview-hq-mp3")
-                    if not preview_url:
-                        continue
-                    
-                    sound_id = sound.get("id", "unknown")
-                    # Sanitize name for filename
-                    safe_name = "".join(c if c.isalnum() or c in "._- " else "" for c in sound.get("name", str(sound_id)))
-                    safe_name = safe_name.strip()[:50]
-                    filename = f"fs_{sound_id}_{safe_name}.mp3"
-                    filepath = self.trending_sounds_dir / filename
-                    
-                    # Skip if already cached
-                    if filepath.exists():
-                        logger.debug(f"Sound already cached: {filename}")
-                        downloaded += 1
-                        continue
-                    
-                    # Download preview MP3 (no auth needed for CDN links)
-                    with httpx.Client(timeout=30) as client:
-                        audio_resp = client.get(preview_url)
-                        audio_resp.raise_for_status()
-                        filepath.write_bytes(audio_resp.content)
-                    
-                    logger.info(f"Downloaded sound: {filename} ({sound.get('duration', '?')}s)")
-                    downloaded += 1
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to download sound {sound.get('id')}: {e}")
-                    continue
-            
-        except Exception as e:
-            logger.error(f"Freesound fetch failed: {e}")
-        
-        return downloaded
-    
+
     def get_random_trending_sound(self) -> Optional[Path]:
-        """
-        Pick a random sound from assets/sounds/ directory (local files only).
-        User adds their own sounds — no API fetching.
-        
-        Returns:
-            Path to a random sound file, or None if none available
-        """
-        # Collect all sound files from assets/sounds/ and subdirectories
-        sound_files = []
-        for ext in ('*.mp3', '*.wav', '*.m4a', '*.ogg'):
+        """Pick a random local sound file from assets/sounds/. User-supplied."""
+        sound_files: List[Path] = []
+        for ext in ("*.mp3", "*.wav", "*.m4a", "*.ogg"):
             sound_files.extend(self.sounds_dir.rglob(ext))
-        
-        # Filter out README and other non-audio files
-        sound_files = [f for f in sound_files if f.suffix in ('.mp3', '.wav', '.m4a', '.ogg')]
-        
-        if sound_files:
-            chosen = random.choice(sound_files)
-            logger.info(f"Using local sound: {chosen.name} ({len(sound_files)} available)")
-            return chosen
-        
-        logger.warning("No sound files in assets/sounds/ — video will have no audio")
-        return None
-    
+        sound_files = [f for f in sound_files if f.suffix in (".mp3", ".wav", ".m4a", ".ogg")]
+
+        if not sound_files:
+            logger.warning("No sound files in assets/sounds/ — video will have no audio")
+            return None
+
+        chosen = random.choice(sound_files)
+        logger.info(f"Using sound: {chosen.name} ({len(sound_files)} available)")
+        return chosen
+
     def add_sound_to_video(
         self,
         input_video_path: str,
         output_video_path: str,
-        sound_path: Optional[str] = None
+        sound_path: Optional[str] = None,
     ) -> bool:
-        """
-        Add background sound/music to video using FFmpeg.
-        
-        If no sound_path specified, picks a random trending sound.
-        
-        Args:
-            input_video_path: Source video (with text overlay)
-            output_video_path: Output with audio
-            sound_path: Path to audio file (None = random trending sound)
-        
-        Returns:
-            True if successful
-        """
         try:
-            # Pick a random trending sound if none specified
             if sound_path is None:
                 sound_file = self.get_random_trending_sound()
                 if sound_file is None:
-                    logger.warning("No sound files available, copying video without audio")
                     import shutil
                     shutil.copy(input_video_path, output_video_path)
                     return True
                 sound_path = str(sound_file)
-            
-            sound_path = Path(sound_path)
-            
-            if not sound_path.exists():
-                logger.warning(f"Sound file not found: {sound_path}, skipping audio")
+
+            sound_path_obj = Path(sound_path)
+            if not sound_path_obj.exists():
+                logger.warning(f"Sound file not found: {sound_path} — copying without audio")
                 import shutil
                 shutil.copy(input_video_path, output_video_path)
                 return True
-            
-            # FFmpeg command to mux audio with video
-            # -shortest: Crop audio to video length
+
             cmd = [
                 "ffmpeg", "-y",
-                "-i", input_video_path,      # Video input
-                "-i", str(sound_path),        # Audio input
-                "-c:v", "copy",               # No re-encode video (fast)
-                "-c:a", "aac",                # TikTok-friendly audio codec
-                "-shortest",                  # Crop audio to video length
-                "-map", "0:v:0",              # Video from first input
-                "-map", "1:a:0",              # Audio from second input
-                output_video_path
+                "-i", input_video_path,
+                "-i", str(sound_path_obj),
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                output_video_path,
             ]
-            
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
             if result.returncode == 0:
-                logger.info(f"Sound added: {sound_path.name if isinstance(sound_path, Path) else sound_path}")
+                logger.info(f"Sound added: {sound_path_obj.name}")
                 return True
-            else:
-                logger.error(f"FFmpeg audio mux error: {result.stderr[:200]}")
-                # Fall back to video without sound
-                import shutil
-                shutil.copy(input_video_path, output_video_path)
-                return False
-                
+            logger.error(f"FFmpeg audio mux error: {result.stderr[:300]}")
+            import shutil
+            shutil.copy(input_video_path, output_video_path)
+            return False
         except FileNotFoundError:
-            logger.error("FFmpeg not found - sound not added")
+            logger.error("FFmpeg not found — sound not added")
             return False
         except Exception as e:
             logger.error(f"Sound addition failed: {e}")
             return False
-    
-    # ===========================
-    # Video Source Pipeline (YouTube via Residential Proxy)
-    # Each clip gets visual uniqueness transforms
-    # ===========================
-    
-    # YouTube search queries — ONLY footage/timelapse compilations (NO tutorials/talking)
-    YOUTUBE_SEARCH_QUERIES = [
-        # City timelapses
-        "4K city timelapse compilation no talking",
-        "city night timelapse 4K compilation",
-        "drone city footage 4K no music",
-        "cinematic b-roll 4K compilation",
-        "city skyline timelapse night 4K",
-        "tokyo night walk 4K footage",
-        "new york city 4K timelapse",
-        "london timelapse 4K night",
-        "city traffic night 4K timelapse",
-        "rain city ambience 4K footage",
-        "neon city lights 4K walking",
-        # Nature timelapses & compilations
-        "nature scenery 4K no commentary",
-        "sunset timelapse 4K collection",
-        "ocean waves 4K relaxing footage",
-        "mountain landscape 4K timelapse",
-        "nature 4K scenery relaxing",
-        "countryside 4K drone footage",
-        "waterfall 4K nature compilation no talking",
-        "forest drone footage 4K no commentary",
-        "northern lights timelapse 4K compilation",
-        "desert landscape 4K drone footage",
-        "tropical beach 4K relaxing footage no talking",
-        "autumn leaves 4K timelapse compilation",
-        "snow mountain 4K drone footage no music",
-        "river nature 4K scenery relaxing footage",
-        "volcano timelapse 4K compilation",
-        "starry night sky 4K timelapse no talking",
-        "coral reef underwater 4K footage compilation",
-        "aerial nature 4K drone compilation no commentary",
-    ]
-    
-    # Pexels fallback queries (if YouTube fails)
-    PEXELS_SEARCH_QUERIES = [
-        "city night timelapse",
-        "city skyline night",
-        "night city lights",
-        "urban night traffic",
-        "sunset city skyline",
-        "nature timelapse scenery",
-        "ocean waves sunset",
-        "mountain landscape sunset",
-        "tokyo city night",
-        "new york skyline night",
-        "rain city night",
-        "neon lights city",
-        "clouds timelapse sky",
-    ]
-    
-    def fetch_youtube_source_videos(self, max_videos: int = 2) -> int:
-        """
-        Download YouTube compilations via residential proxy to avoid IP blocks.
-        
-        Uses YOUTUBE_PROXY env var (format: socks5://user:pass@host:port)
-        Falls back to direct connection if no proxy set.
-        
-        Downloads to {output_dir}/youtube_sources/ for scene extraction.
-        """
-        import yt_dlp
-        
-        source_dir = self.output_dir / "youtube_sources"
-        source_dir.mkdir(parents=True, exist_ok=True)
-        
-        existing = list(source_dir.glob("*.mp4"))
-        if len(existing) >= 5:
-            logger.info(f"YouTube source cache has {len(existing)} videos — sufficient")
-            return len(existing)
-        
-        # Residential proxy to bypass YouTube bot detection
-        proxy_url = os.getenv("YOUTUBE_PROXY", "")
-        if proxy_url:
-            logger.info(f"YouTube download using proxy: {proxy_url[:30]}...")
-        else:
-            logger.warning("YOUTUBE_PROXY not set — downloading direct (may be blocked on datacenter IPs)")
-        
-        downloaded = 0
-        query = random.choice(self.YOUTUBE_SEARCH_QUERIES)
-        search_term = f"ytsearch3:{query}"
-        
-        logger.info(f"Searching YouTube for: '{query}'")
-        
-        ydl_opts = {
-            "format": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
-            "merge_output_format": "mp4",
-            "outtmpl": str(source_dir / "yt_%(id)s.%(ext)s"),
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "match_filter": yt_dlp.utils.match_filter_func("duration >= 180 & duration <= 1800"),
-        }
-        
-        # Add proxy if configured
-        if proxy_url:
-            ydl_opts["proxy"] = proxy_url
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(search_term, download=False)
-                
-                if not info or "entries" not in info:
-                    logger.warning(f"No YouTube results for '{query}'")
-                    return 0
-                
-                entries = list(info["entries"])
-                
-                for entry in entries[:max_videos]:
-                    if entry is None:
-                        continue
-                    
-                    video_id = entry.get("id", "unknown")
-                    title = entry.get("title", "Unknown")
-                    duration = entry.get("duration", 0)
-                    
-                    target_path = source_dir / f"yt_{video_id}.mp4"
-                    if target_path.exists():
-                        logger.info(f"  Already cached: {title} ({duration}s)")
-                        continue
-                    
-                    logger.info(f"  Downloading: {title} ({duration}s)...")
-                    
-                    try:
-                        ydl.download([entry["webpage_url"]])
-                        
-                        if target_path.exists():
-                            size_mb = target_path.stat().st_size / 1024 / 1024
-                            logger.info(f"  ✓ Downloaded: {title} ({size_mb:.1f}MB)")
-                            downloaded += 1
-                        else:
-                            matches = list(source_dir.glob(f"yt_{video_id}.*"))
-                            if matches:
-                                if matches[0].suffix != ".mp4":
-                                    matches[0].rename(target_path)
-                                downloaded += 1
-                                logger.info(f"  ✓ Downloaded: {title}")
-                            else:
-                                logger.warning(f"  ⚠ File not found after download: {video_id}")
-                    except Exception as e:
-                        logger.warning(f"  ✗ Failed to download {title}: {e}")
-                        continue
-                
-        except Exception as e:
-            logger.error(f"YouTube fetch failed: {e}")
-        
-        logger.info(f"YouTube fetch complete: {downloaded} new source videos")
-        return downloaded
-    
-    def detect_scenes(self, video_path: str, threshold: float = 0.3) -> List[float]:
-        """Detect scene changes using FFmpeg scene detection filter."""
-        try:
-            cmd = [
-                "ffmpeg", "-i", video_path,
-                "-vf", f"select='gt(scene,{threshold})',showinfo",
-                "-vsync", "vfr",
-                "-f", "null", "-"
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            
-            timestamps = []
-            for line in result.stderr.split("\n"):
-                if "pts_time:" in line:
-                    try:
-                        pts_part = line.split("pts_time:")[1]
-                        ts = float(pts_part.split()[0])
-                        timestamps.append(ts)
-                    except (ValueError, IndexError):
-                        continue
-            
-            if not timestamps or timestamps[0] > 1.0:
-                timestamps.insert(0, 0.0)
-            
-            filtered = [timestamps[0]]
-            for ts in timestamps[1:]:
-                if ts - filtered[-1] >= 5.0:
-                    filtered.append(ts)
-            
-            logger.info(f"Detected {len(filtered)} scenes in {video_path}")
-            return filtered
-            
-        except subprocess.TimeoutExpired:
-            logger.error(f"Scene detection timed out for {video_path}")
-            return [0.0]
-        except Exception as e:
-            logger.error(f"Scene detection failed: {e}")
-            return [0.0]
-    
-    def extract_scene_clips(
+
+    # -------------------------------------------------------------------------
+    # Main pipeline
+    # -------------------------------------------------------------------------
+
+    def generate_jesusai_video(
         self,
-        source_path: str,
-        scenes: List[float],
-        clip_duration: int = 8,
-        max_clips: int = 50
-    ) -> int:
-        """Extract unique clips from each detected scene, cropped to 9:16."""
-        scene_dir = self.output_dir / "scene_clips"
-        scene_dir.mkdir(parents=True, exist_ok=True)
-        
-        source_name = Path(source_path).stem
-        
-        try:
-            probe_cmd = [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                source_path
-            ]
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
-            total_duration = float(probe_result.stdout.strip() or "0")
-        except Exception:
-            total_duration = 0
-        
-        extracted = 0
-        
-        for i, scene_ts in enumerate(scenes[:max_clips]):
-            this_clip_duration = random.randint(7, 10)
-            
-            if total_duration > 0 and scene_ts + this_clip_duration > total_duration:
-                continue
-            
-            clip_filename = f"{source_name}_scene{i:03d}.mp4"
-            clip_path = scene_dir / clip_filename
-            
-            if clip_path.exists():
-                extracted += 1
-                continue
-            
-            try:
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-ss", str(scene_ts),
-                    "-i", source_path,
-                    "-t", str(this_clip_duration),
-                    "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
-                    "-an",
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-movflags", "+faststart",
-                    clip_path
-                ]
-                
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                
-                if result.returncode == 0 and clip_path.exists():
-                    extracted += 1
-                    if extracted % 10 == 0:
-                        logger.info(f"  Extracted {extracted} clips so far...")
-                else:
-                    logger.debug(f"  Clip {i} failed: {result.stderr[:100]}")
-                    
-            except Exception as e:
-                logger.debug(f"  Clip {i} extraction error: {e}")
-                continue
-        
-        logger.info(f"Extracted {extracted} scene clips from {source_name}")
-        return extracted
-    
-    def _replenish_scene_clips(self):
-        """Auto-fetch YouTube source videos and extract ALL possible scene clips."""
-        try:
-            logger.info("Replenishing scene clips from YouTube...")
-            downloaded = self.fetch_youtube_source_videos(max_videos=2)
-            logger.info(f"YouTube fetch returned {downloaded}")
-            
-            source_dir = self.output_dir / "youtube_sources"
-            scene_dir = self.output_dir / "scene_clips"
-            
-            if not source_dir.exists():
-                logger.warning(f"No YouTube source dir: {source_dir}")
-                return
-            
-            for source_video in list(source_dir.glob("*.mp4")):
-                source_name = source_video.stem
-                existing_clips = list(scene_dir.glob(f"{source_name}_scene*.mp4"))
-                if len(existing_clips) >= 5:
-                    continue
-                
-                logger.info(f"Processing: {source_name}...")
-                scenes = self.detect_scenes(str(source_video), threshold=0.3)
-                # Extract ALL detected scenes — maximize clip library
-                extracted = self.extract_scene_clips(str(source_video), scenes, max_clips=999)
-                logger.info(f"  Extracted {extracted} clips from {source_name}")
-                
-        except Exception as e:
-            logger.error(f"_replenish_scene_clips FAILED: {type(e).__name__}: {e}")
-    
-    def fetch_pexels_footage(self, count: int = 5) -> int:
-        """
-        Fallback: Fetch stock clips from Pexels API (FREE) when YouTube is unavailable.
-        """
-        api_key = os.getenv("PEXELS_API_KEY", "")
-        if not api_key:
-            logger.warning("PEXELS_API_KEY not set — can't fetch Pexels footage")
-            return 0
-        
-        stock_dir = self.output_dir / "stock_clips"
-        stock_dir.mkdir(parents=True, exist_ok=True)
-        
-        existing = list(stock_dir.glob("*.mp4"))
-        if len(existing) >= 20:
-            logger.info(f"Pexels cache has {len(existing)} clips — sufficient")
-            return len(existing)
-        
-        import httpx
-        downloaded = 0
-        
-        try:
-            query = random.choice(self.PEXELS_SEARCH_QUERIES)
-            logger.info(f"Fetching from Pexels: '{query}'")
-            
-            with httpx.Client(timeout=30) as client:
-                resp = client.get(
-                    "https://api.pexels.com/videos/search",
-                    params={
-                        "query": query,
-                        "per_page": min(count, 15),
-                        "orientation": "portrait",
-                        "size": "medium",
-                    },
-                    headers={"Authorization": api_key}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            
-            videos = data.get("videos", [])
-            if not videos:
-                logger.warning(f"No Pexels results for '{query}'")
-                return 0
-            
-            for video in videos[:count]:
-                video_id = video.get("id", "unknown")
-                video_files = video.get("video_files", [])
-                
-                best_file = None
-                for vf in video_files:
-                    w = vf.get("width", 0)
-                    h = vf.get("height", 0)
-                    if h >= 720 and vf.get("link"):
-                        if best_file is None or (h > w and h <= 1920):
-                            best_file = vf
-                
-                if not best_file:
-                    best_file = next((vf for vf in video_files if vf.get("link")), None)
-                
-                if not best_file:
-                    continue
-                
-                filename = f"stock_{video_id}.mp4"
-                filepath = stock_dir / filename
-                
-                if filepath.exists():
-                    continue
-                
-                try:
-                    with httpx.Client(timeout=60) as client:
-                        dl_resp = client.get(best_file["link"])
-                        dl_resp.raise_for_status()
-                        filepath.write_bytes(dl_resp.content)
-                    
-                    downloaded += 1
-                    size_mb = filepath.stat().st_size / 1024 / 1024
-                    logger.info(f"  Downloaded: {filename} ({size_mb:.1f}MB)")
-                except Exception as e:
-                    logger.warning(f"  Failed to download {video_id}: {e}")
-            
-            logger.info(f"Pexels fetch complete: {downloaded} new clips")
-            
-        except Exception as e:
-            logger.error(f"Pexels API fetch failed: {e}")
-        
-        return downloaded
-    
-    def clip_with_transforms(self, source_path: str, output_path: str, duration: int = 8) -> bool:
-        """
-        Clip a video and apply random visual transforms for uniqueness.
-        
-        Transforms: random start, crop offset, hflip, hue shift,
-        brightness/saturation, speed variation. Output: 9:16 (720x1280).
-        """
-        try:
-            probe_cmd = [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                source_path
-            ]
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
-            total_duration = float(probe_result.stdout.strip() or "0")
-            
-            speed_factor = random.uniform(0.85, 1.15)
-            adjusted_duration = duration / speed_factor
-            
-            if total_duration < adjusted_duration + 1:
-                start_time = 0
-            else:
-                max_start = total_duration - adjusted_duration - 1
-                start_time = random.uniform(0, max(0, max_start))
-            
-            # Build FFmpeg visual uniqueness filter chain
-            filters = []
-            
-            if abs(speed_factor - 1.0) > 0.02:
-                filters.append(f"setpts={1.0/speed_factor}*PTS")
-            
-            scale_extra = random.randint(20, 80)
-            filters.append(f"scale={720 + scale_extra}:{1280 + scale_extra}:force_original_aspect_ratio=increase")
-            
-            crop_x = random.randint(0, scale_extra)
-            crop_y = random.randint(0, scale_extra)
-            filters.append(f"crop=720:1280:{crop_x}:{crop_y}")
-            
-            if random.random() < 0.5:
-                filters.append("hflip")
-            
-            hue_shift = random.uniform(-30, 30)
-            brightness = random.uniform(-0.1, 0.1)
-            saturation = random.uniform(0.85, 1.15)
-            filters.append(f"eq=brightness={brightness:.3f}:saturation={saturation:.2f}")
-            filters.append(f"hue=h={hue_shift:.1f}")
-            
-            filter_chain = ",".join(filters)
-            
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(start_time),
-                "-i", source_path,
-                "-t", str(adjusted_duration),
-                "-vf", filter_chain,
-                "-an",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-movflags", "+faststart",
-                "-t", str(duration),
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
-            
-            if result.returncode == 0:
-                transforms_log = f"speed={speed_factor:.2f}x, hue={hue_shift:+.0f}°, bright={brightness:+.2f}, sat={saturation:.2f}"
-                logger.info(f"Unique clip: {duration}s from {start_time:.1f}s [{transforms_log}]")
-                return True
-            else:
-                logger.error(f"Transform clip failed: {result.stderr[:200]}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"clip_with_transforms failed: {e}")
-            return False
-    
-    def clip_stock_footage(self, source_path: str, output_path: str, duration: int = 8) -> bool:
-        """Basic clip fallback: crop to 9:16 without visual transforms."""
-        try:
-            probe_cmd = [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                source_path
-            ]
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
-            total_duration = float(probe_result.stdout.strip() or "0")
-            
-            if total_duration < duration + 1:
-                start_time = 0
-            else:
-                max_start = total_duration - duration - 1
-                start_time = random.uniform(0, max(0, max_start))
-            
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(start_time),
-                "-i", source_path,
-                "-t", str(duration),
-                "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
-                "-an",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-movflags", "+faststart",
-                output_path
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if result.returncode == 0:
-                logger.info(f"Basic clip: {duration}s from {start_time:.1f}s")
-                return True
-            else:
-                logger.error(f"Basic clip failed: {result.stderr[:200]}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"clip_stock_footage failed: {e}")
-            return False
-    
-    def generate_stock_video(
-        self,
-        text_overlay: Optional[str] = None,
-    ) -> 'GeneratedVideo':
-        """
-        Generate a unique video using YouTube scene clips (via residential proxy).
-        
-        Pipeline:
-        1. Fetch YouTube scene clips via residential proxy
-        2. Apply visual uniqueness transforms (hue, speed, flip, brightness, crop offset)
-        3. Add Loom-style multi-line text overlay
-        4. Add trending sound
-        5. Strip metadata
-        
-        Cost: $0.00 — each clip is visually unique
-        """
-        start_time = time.time()
-        
-        # === SOURCE: YouTube scene clips only (no Pexels) ===
-        # Clips are DELETED after use to guarantee no reuse
-        source_clip = None
-        source_type = None
-        
-        scene_dir = self.output_dir / "scene_clips"
-        scene_dir.mkdir(parents=True, exist_ok=True)
-        scene_clips = list(scene_dir.glob("*.mp4"))
-        
-        if len(scene_clips) < 5:
-            logger.info("Low scene clips cache — fetching from YouTube...")
-            self._replenish_scene_clips()
-            scene_clips = list(scene_dir.glob("*.mp4"))
-        
-        if scene_clips:
-            source_clip = random.choice(scene_clips)
-            source_type = "youtube_scene"
-            logger.info(f"Using YouTube scene clip: {source_clip.name} ({len(scene_clips)} remaining)")
-        
-        if source_clip is None:
-            logger.error("No YouTube scene clips available. Check YOUTUBE_PROXY env var and proxy credentials.")
-            return GeneratedVideo(
-                success=False,
-                error="No YouTube clips available. Check YOUTUBE_PROXY env var.",
-                cost_usd=0.00
-            )
-        
-        # 2. Clip + apply visual transforms
-        clip_duration = 7  # Fixed 7-second clips
-        video_filename = f"teamwork_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
-        raw_clip_path = self.output_dir / f"raw_{video_filename}"
-        final_video_path = self.output_dir / video_filename
-        
-        clip_success = self.clip_with_transforms(
-            str(source_clip),
-            str(raw_clip_path),
-            duration=clip_duration
-        )
-        
-        if not clip_success:
-            clip_success = self.clip_stock_footage(
-                str(source_clip),
-                str(raw_clip_path),
-                duration=clip_duration
-            )
-        
-        if not clip_success:
-            logger.error(f"Clip processing failed for {source_type} clip")
-            return GeneratedVideo(
-                success=False,
-                error="Clip processing failed",
-                cost_usd=0.00
-            )
-        
-        # Delete the source scene clip after use — never reuse
-        try:
-            source_clip.unlink()
-            logger.info(f"Deleted used scene clip: {source_clip.name}")
-        except Exception as e:
-            logger.warning(f"Could not delete used clip {source_clip.name}: {e}")
-        
-        # 3. Add text overlay
-        final_text_line = text_overlay or random.choice(TEXT_OVERLAY_LINES)
-        overlay_path = self.output_dir / f"overlay_{video_filename}"
-        
-        overlay_success = self.add_text_overlay(
-            str(raw_clip_path),
-            str(overlay_path),
-            final_text_line,
-            repeat_count=8,
-            font_size=42
-        )
-        
-        if overlay_success:
-            raw_clip_path.unlink(missing_ok=True)
-        else:
-            overlay_path = raw_clip_path
-            logger.warning("Using clip without text overlay")
-        
-        # 4. Add trending sound
-        sound_path = self.output_dir / f"sound_{video_filename}"
-        sound_success = self.add_sound_to_video(
-            str(overlay_path),
-            str(sound_path)
-        )
-        
-        if sound_success and sound_path.exists():
-            if overlay_path != raw_clip_path:
-                overlay_path.unlink(missing_ok=True)
-        else:
-            sound_path = overlay_path
-            logger.warning("Using video without sound")
-        
-        # 5. Strip metadata
-        strip_success = self.strip_metadata(
-            str(sound_path),
-            str(final_video_path)
-        )
-        
-        if strip_success:
-            if sound_path != overlay_path and sound_path != raw_clip_path:
-                sound_path.unlink(missing_ok=True)
-        else:
-            if sound_path.exists():
-                sound_path.rename(final_video_path)
-        
-        elapsed = time.time() - start_time
-        
-        if final_video_path.exists():
-            logger.info(f"Video generated ({source_type}) in {elapsed:.1f}s: {final_video_path.name}")
-            return GeneratedVideo(
-                success=True,
-                video_path=str(final_video_path),
-                text_overlay=final_text_line,
-                cost_usd=0.00
-            )
-        else:
-            return GeneratedVideo(
-                success=False,
-                error="Video pipeline failed",
-                cost_usd=0.00
-            )
-    
-    # ===========================
-    # Main Video Pipeline v4 (AI — costs ~$0.15-0.24/video)
-    # ===========================
-    
-    def generate_teamwork_video(
-        self,
-        style_hint: Optional[str] = None,
+        competition: Optional[str] = None,
+        mode: str = "realistic",
         text_overlay: Optional[str] = None,
         skip_overlay: bool = False,
-        image_url: Optional[str] = None
+        image_url: Optional[str] = None,
+        sound_path: Optional[str] = None,
     ) -> GeneratedVideo:
         """
-        Generate a complete teamwork trend video.
-        
-        Pipeline v4:
-        1. JSON-structured prompt → Nano Banana Pro 1K creates ultra-realistic image
-        2. Hailuo 2.3 Standard converts to 6s 768P video
-        3. FFmpeg adds text overlay
-        4. FFmpeg adds random trending sound
-        5. FFmpeg strips metadata
-        
+        Generate a single JesusAI video.
+
         Args:
-            style_hint: Location style hint (beach, forest, city, etc.)
-            text_overlay: Custom text, or random from list
-            skip_overlay: Skip FFmpeg overlay step
-            image_url: Pre-generated image URL (for image reuse across multiple videos)
-        
-        Returns:
-            GeneratedVideo with paths and URLs
+            competition: Name match (e.g. "chess") or None for random
+            mode: "realistic" or "cartoon"
+            text_overlay: Custom overlay line, or None for random from TEXT_OVERLAY_LINES
+            skip_overlay: Skip the FFmpeg overlay step
+            image_url: Pre-existing image URL (skips Nano Banana stage — for image reuse)
+            sound_path: Specific sound file (or None for random from assets/sounds/)
         """
         cost = 0.0
-        image_prompt = None
-        
-        # 1. Generate or reuse image
+        comp = self.pick_competition(competition)
+        logger.info(f"JesusAI: {comp['name']} ({mode})")
+
+        # 1. IMAGE — Nano Banana Pro 2K (skip if reusing)
+        prompt_str = None
         if image_url:
-            # Reuse existing image (no extra cost)
-            logger.info(f"Step 1: Reusing existing image: {image_url[:80]}...")
+            logger.info(f"Reusing image: {image_url[:80]}...")
         else:
-            # Generate new image with JSON prompt
-            logger.info("Step 1: Generating JSON image prompt...")
-            image_prompt = self.generate_image_prompt_with_claude(style_hint)
-            
-            logger.info("Step 2: Generating 1K image with Nano Banana Pro...")
+            prompt_str = build_jesusai_image_prompt(comp, mode=mode)
+            logger.info("Generating image with Nano Banana Pro 2K...")
             image_result = self.kie.generate_image(
-                prompt=image_prompt,
+                prompt=prompt_str,
                 aspect_ratio="9:16",
-                resolution="1K",
-                output_format="png"
+                resolution="2K",
+                output_format="png",
             )
-            
-            if not image_result.success:
+            if not image_result.success or not image_result.task_id:
                 return GeneratedVideo(
                     success=False,
-                    error=f"Image generation failed: {image_result.error}",
-                    prompt_used=image_prompt
+                    competition=comp["name"],
+                    mode=mode,
+                    error=f"Image submit failed: {image_result.error}",
+                    prompt_used=prompt_str,
                 )
-            
-            # Wait for image
-            logger.info(f"Waiting for image task {image_result.task_id}...")
-            image_final = self.kie.wait_for_task(image_result.task_id, timeout_seconds=180)
-            
-            if not image_final.success or not image_final.result_urls:
+
+            wait = self.kie.wait_for_task(image_result.task_id, timeout_seconds=180, poll_interval=5)
+            if not wait.success or not wait.result_urls:
                 return GeneratedVideo(
                     success=False,
-                    error=f"Image generation failed: {image_final.error or 'No result URLs'}",
-                    prompt_used=image_prompt
+                    competition=comp["name"],
+                    mode=mode,
+                    error=f"Image generation failed: {wait.error or wait.state}",
+                    prompt_used=prompt_str,
                 )
-            
-            image_url = image_final.result_urls[0]
-            cost += 0.09  # Nano Banana Pro 1K cost
-            logger.info(f"1K Image generated: {image_url}")
-        
-        # 2. Convert to video with Hailuo 2.3 Standard (6s, 768P)
-        logger.info("Step 3: Converting to video with Hailuo 2.3 Standard 6s 768P...")
-        video_prompt = self.generate_video_motion_prompt()
-        
-        video_result = self.kie.image_to_video_hailuo(
-            image_url=image_url,
-            prompt=video_prompt,
-            duration="6",
-            resolution="768P"
-        )
-        
-        if not video_result.success:
+            image_url = wait.result_urls[0]
+            cost += 0.12  # Nano Banana Pro 2K
+            logger.info(f"Image ready: {image_url[:80]}...")
+
+        # 2. VIDEO — Kling 2.6 (default) or Hailuo 2.3
+        motion_prompt = build_jesusai_motion_prompt(comp)
+        logger.info(f"Animating with {self.DEFAULT_VIDEO_MODEL}...")
+
+        if self.DEFAULT_VIDEO_MODEL == "kling":
+            video_result = self.kie.image_to_video_kling(
+                image_url=image_url,
+                prompt=motion_prompt,
+                duration="5",
+                aspect_ratio="9:16",
+            )
+            video_cost = 0.10
+        else:
+            video_result = self.kie.image_to_video_hailuo(
+                image_url=image_url,
+                prompt=motion_prompt,
+                duration="6",
+                resolution="768P",
+            )
+            video_cost = 0.15
+
+        if not video_result.success or not video_result.task_id:
             return GeneratedVideo(
                 success=False,
-                error=f"Hailuo video failed: {video_result.error}",
+                competition=comp["name"],
+                mode=mode,
                 image_url=image_url,
-                prompt_used=image_prompt,
-                cost_usd=cost
+                error=f"Video submit failed: {video_result.error}",
+                prompt_used=prompt_str,
+                cost_usd=cost,
             )
-        
-        # Wait for video
-        logger.info(f"Waiting for Hailuo video task {video_result.task_id}...")
-        video_final = self.kie.wait_for_task(video_result.task_id, timeout_seconds=600)
-        
-        if not video_final.success or not video_final.result_urls:
+
+        video_wait = self.kie.wait_for_task(video_result.task_id, timeout_seconds=420, poll_interval=8)
+        if not video_wait.success or not video_wait.result_urls:
             return GeneratedVideo(
                 success=False,
-                error=f"Hailuo video failed: {video_final.error or 'No result URLs'}",
+                competition=comp["name"],
+                mode=mode,
                 image_url=image_url,
-                prompt_used=image_prompt,
-                cost_usd=cost
+                error=f"Video generation failed: {video_wait.error or video_wait.state}",
+                prompt_used=prompt_str,
+                cost_usd=cost,
             )
-        
-        video_url = video_final.result_urls[0]
-        cost += 0.15  # Hailuo 2.3 Standard 6s 768P cost
-        logger.info(f"Hailuo video generated: {video_url}")
-        
-        # 4. Download video
-        video_filename = f"teamwork_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
-        raw_video_path = self.output_dir / f"raw_{video_filename}"
-        final_video_path = self.output_dir / video_filename
-        
+
+        cost += video_cost
+        video_url = video_wait.result_urls[0]
+        logger.info(f"Video ready: {video_url[:80]}...")
+
+        # 3. Download
+        video_filename = f"jesusai_{int(time.time())}_{random.randint(1000, 9999)}.mp4"
+        raw_path = self.output_dir / f"raw_{video_filename}"
+        final_path = self.output_dir / video_filename
+
         try:
             import httpx
-            logger.info("Downloading video...")
-            with httpx.Client(timeout=60) as client:
-                response = client.get(video_url)
-                response.raise_for_status()
-                raw_video_path.write_bytes(response.content)
-            logger.info(f"Video downloaded: {raw_video_path}")
+            with httpx.Client(timeout=120) as client:
+                resp = client.get(video_url)
+                resp.raise_for_status()
+                raw_path.write_bytes(resp.content)
         except Exception as e:
             return GeneratedVideo(
                 success=False,
-                error=f"Video download failed: {e}",
+                competition=comp["name"],
+                mode=mode,
                 image_url=image_url,
                 video_url=video_url,
-                prompt_used=image_prompt,
-                cost_usd=cost
+                error=f"Video download failed: {e}",
+                prompt_used=prompt_str,
+                cost_usd=cost,
             )
-        
-        # 5. Add Loom-style multi-line text overlay
-        final_text_line = text_overlay or random.choice(TEXT_OVERLAY_LINES)
-        overlay_video_path = self.output_dir / f"overlay_{video_filename}"
-        
-        if skip_overlay:
-            overlay_video_path = raw_video_path
+
+        # 4. FFmpeg post-process: overlay -> sound -> strip metadata
+        current_path = raw_path
+        chosen_overlay = text_overlay or random.choice(TEXT_OVERLAY_LINES)
+
+        if not skip_overlay:
+            overlay_path = self.output_dir / f"overlay_{video_filename}"
+            if self.add_text_overlay(str(current_path), str(overlay_path), chosen_overlay):
+                current_path.unlink(missing_ok=True)
+                current_path = overlay_path
+
+        sound_out = self.output_dir / f"sound_{video_filename}"
+        if self.add_sound_to_video(str(current_path), str(sound_out), sound_path=sound_path):
+            if current_path != raw_path:
+                current_path.unlink(missing_ok=True)
+            current_path = sound_out
+
+        if not self.strip_metadata(str(current_path), str(final_path)):
+            # If strip failed, just rename current -> final
+            if current_path.exists():
+                current_path.rename(final_path)
         else:
-            overlay_success = self.add_text_overlay(
-                str(raw_video_path),
-                str(overlay_video_path),
-                final_text_line,  # Repeated 8x vertically
-                repeat_count=8,
-                font_size=42   # Large bold text covering ~60% of screen
+            if current_path != raw_path and current_path.exists():
+                current_path.unlink(missing_ok=True)
+
+        if not final_path.exists():
+            return GeneratedVideo(
+                success=False,
+                competition=comp["name"],
+                mode=mode,
+                image_url=image_url,
+                video_url=video_url,
+                error="Final video missing after post-process",
+                prompt_used=prompt_str,
+                cost_usd=cost,
             )
-            
-            if overlay_success:
-                raw_video_path.unlink(missing_ok=True)  # Delete raw
-            else:
-                # Fallback: use raw video without overlay
-                overlay_video_path = raw_video_path
-                logger.warning("Using video without text overlay")
-        
-        # 6. Add random trending sound
-        logger.info("Step 6: Adding trending sound...")
-        sound_video_path = self.output_dir / f"sound_{video_filename}"
-        sound_success = self.add_sound_to_video(
-            str(overlay_video_path),
-            str(sound_video_path)
-        )
-        
-        if sound_success and sound_video_path.exists():
-            # Delete overlay intermediate
-            if overlay_video_path != raw_video_path:
-                overlay_video_path.unlink(missing_ok=True)
-        else:
-            # Fallback: use video without sound
-            sound_video_path = overlay_video_path
-            logger.warning("Using video without sound")
-        
-        # 7. Strip metadata to remove AI fingerprints
-        logger.info("Step 7: Stripping metadata...")
-        strip_success = self.strip_metadata(
-            str(sound_video_path),
-            str(final_video_path)
-        )
-        
-        if strip_success:
-            # Delete intermediate file
-            if sound_video_path != overlay_video_path and sound_video_path != raw_video_path:
-                sound_video_path.unlink(missing_ok=True)
-        else:
-            # Fallback: use video with metadata
-            if sound_video_path.exists():
-                sound_video_path.rename(final_video_path)
-            logger.warning("Using video with metadata (strip failed)")
-        
+
         return GeneratedVideo(
             success=True,
-            video_path=str(final_video_path),
+            video_path=str(final_path),
             image_url=image_url,
             video_url=video_url,
-            prompt_used=image_prompt,
-            text_overlay=final_text_line if not skip_overlay else None,
-            cost_usd=cost
+            competition=comp["name"],
+            mode=mode,
+            prompt_used=prompt_str,
+            text_overlay=chosen_overlay,
+            cost_usd=cost,
         )
-    
+
+    # -------------------------------------------------------------------------
+    # Batch helpers
+    # -------------------------------------------------------------------------
+
     def generate_batch(
         self,
-        count: int = 5,
-        style_hints: Optional[List[str]] = None,
-        skip_overlay: bool = False
+        count: int = 1,
+        mode: str = "realistic",
     ) -> List[GeneratedVideo]:
-        """
-        Generate multiple videos using YouTube scene clips (FREE, unique).
-        Each video uses a unique clip to prevent duplicate content violations.
-        
-        Args:
-            count: Number of videos to generate
-            style_hints: Ignored (kept for API compatibility)
-            skip_overlay: Ignored (kept for API compatibility)
-        
-        Returns:
-            List of GeneratedVideo results
-        """
-        results = []
-        
-        # Reset used clips for fresh batch uniqueness
-        self._used_clips.clear()
-        
+        """Generate `count` videos with random competitions."""
+        results: List[GeneratedVideo] = []
         for i in range(count):
-            logger.info(f"Generating stock video {i+1}/{count}...")
-            
-            result = self.generate_stock_video()
-            results.append(result)
-            
-            if result.success:
-                logger.info(f"Video {i+1} success: {result.video_path} ($0.00)")
-            else:
-                logger.error(f"Video {i+1} failed: {result.error}")
-            
-            # Small delay between generations
-            if i < count - 1:
-                time.sleep(2)
-        
+            logger.info(f"Batch progress: {i + 1}/{count}")
+            results.append(self.generate_jesusai_video(mode=mode))
         return results
-    
+
     def generate_batch_for_account(
         self,
-        count: int = 3,
-        style_hint: Optional[str] = None,
-        text_overlay: Optional[str] = None,
-        skip_overlay: bool = False
+        count: int = 1,
+        mode: str = "realistic",
     ) -> List[GeneratedVideo]:
         """
-        Generate multiple AI videos for one account, reusing a single base image.
-        
-        Cost optimization: generates 1 image ($0.09) then creates 'count' videos
-        from it concurrently with varied Hailuo 2.3 motion prompts ($0.15 each).
-        
-        Args:
-            count: Number of videos (default 3 per account)
-            style_hint: Location theme for the base image
-            text_overlay: Custom text overlay (or random)
-            skip_overlay: Skip text overlay step
-        
-        Returns:
-            List of GeneratedVideo results
+        Generate `count` videos for an account.
+
+        Reuses the same base image across the batch by generating one image then
+        animating it `count` times with different motion seeds. Cuts cost from
+        $0.22*N to $0.12 + $0.10*N (image generated once).
         """
-        import concurrent.futures
-        results = []
-        
-        # Step 1: Generate ONE base image
-        logger.info(f"=== Batch for account: generating 1 image + {count} videos ===")
-        logger.info("Batch Step 1: Generating base image...")
-        
-        image_prompt = self.generate_image_prompt_with_claude(style_hint)
-        
-        image_result = self.kie.generate_image(
-            prompt=image_prompt,
-            aspect_ratio="9:16",
-            resolution="1K",
-            output_format="png"
-        )
-        
-        if not image_result.success:
-            logger.error(f"Base image generation failed: {image_result.error}")
-            return [GeneratedVideo(success=False, error=f"Base image failed: {image_result.error}")] * count
-        
-        image_final = self.kie.wait_for_task(image_result.task_id, timeout_seconds=180)
-        
-        if not image_final.success or not image_final.result_urls:
-            logger.error(f"Base image failed: {image_final.error or 'No URLs'}")
-            return [GeneratedVideo(success=False, error=f"Base image failed: {image_final.error}")] * count
-        
-        base_image_url = image_final.result_urls[0]
-        logger.info(f"Base image ready: {base_image_url[:80]}...")
-        
-        # Step 2: Generate 'count' videos CONCURRENTLY from the SAME image
-        logger.info(f"Batch Step 2: Submitting {count} video generation tasks concurrently...")
-        
-        def _generate_single_video(i):
-            logger.info(f"Batch thread {i+1}/{count}: Starting video generation...")
-            try:
-                # Add slight stagger to avoid rate limiting on submission
-                time.sleep(i * 1.5)
-                res = self.generate_teamwork_video(
-                    style_hint=style_hint,
-                    text_overlay=text_overlay,
-                    skip_overlay=skip_overlay,
-                    image_url=base_image_url
+        if count <= 0:
+            return []
+
+        comp = self.pick_competition()
+        # First video — generates the image
+        first = self.generate_jesusai_video(competition=comp["name"], mode=mode)
+        results: List[GeneratedVideo] = [first]
+
+        if not first.success or not first.image_url:
+            # Image gen failed; fall back to independent generations for the rest
+            for _ in range(count - 1):
+                results.append(self.generate_jesusai_video(mode=mode))
+            return results
+
+        # Reuse image for remaining videos
+        for i in range(count - 1):
+            logger.info(f"Reusing base image for video {i + 2}/{count}...")
+            results.append(
+                self.generate_jesusai_video(
+                    competition=comp["name"],
+                    mode=mode,
+                    image_url=first.image_url,
                 )
-                if res.success:
-                    logger.info(f"Batch thread {i+1}: Success - {res.video_path}")
-                else:
-                    logger.error(f"Batch thread {i+1}: Failed - {res.error}")
-                return res
-            except Exception as e:
-                logger.error(f"Batch thread {i+1} crashed: {e}")
-                return GeneratedVideo(success=False, error=str(e))
-        
-        # Run video generations in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=count) as executor:
-            # Submit all tasks
-            futures = [executor.submit(_generate_single_video, i) for i in range(count)]
-            # Wait for all to complete
-            for future in concurrent.futures.as_completed(futures):
-                results.append(future.result())
-        
-        total_cost = 0.09 + sum(r.cost_usd for r in results)  # Add image cost
-        success_count = sum(1 for r in results if r.success)
-        logger.info(f"=== Batch complete: {success_count}/{count} videos, total cost: ${total_cost:.2f} ===")
-        
+            )
         return results
-    
-    # ===========================
-    # TikTok Content Helpers
-    # ===========================
-    
+
+    # -------------------------------------------------------------------------
+    # Caption helpers
+    # -------------------------------------------------------------------------
+
     @staticmethod
     def get_random_caption() -> str:
-        """Get random caption for TikTok post."""
         return random.choice(CAPTIONS)
-    
+
     @staticmethod
     def get_hashtags() -> str:
-        """Get standard hashtag set."""
         return HASHTAGS
-    
+
     @staticmethod
     def get_full_description() -> str:
-        """Get random caption with hashtags."""
         return f"{random.choice(CAPTIONS)} {HASHTAGS}"
 
+    # -------------------------------------------------------------------------
+    # Backwards-compat aliases (so legacy callers don't break)
+    # -------------------------------------------------------------------------
 
-# Module-level instance
-_generator: Optional[VideoGenerator] = None
+    def generate_teamwork_video(self, *args, **kwargs) -> GeneratedVideo:
+        """Deprecated alias — content is now JesusAI. Forwards to generate_jesusai_video."""
+        # Strip kwargs that don't apply
+        kwargs.pop("style_hint", None)
+        return self.generate_jesusai_video(*args, **kwargs)
+
+
+# =============================================================================
+# Singleton
+# =============================================================================
+
+_video_generator: Optional[VideoGenerator] = None
+
 
 def get_video_generator() -> VideoGenerator:
-    """Get or create video generator singleton."""
-    global _generator
-    if _generator is None:
-        _generator = VideoGenerator()
-    return _generator
+    global _video_generator
+    if _video_generator is None:
+        _video_generator = VideoGenerator()
+    return _video_generator

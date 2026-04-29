@@ -1161,7 +1161,7 @@ async def run_enhanced_warmup(
     """
     phone_ids = data.get("phone_ids", [])
     duration = data.get("duration_minutes", 30)
-    keywords = data.get("keywords", ["teamwork", "motivation"])
+    keywords = data.get("keywords", ["jesus", "jesus saves", "christian"])
     enable_comments = data.get("enable_comments", True)
     enable_likes = data.get("enable_likes", True)
     like_probability = data.get("like_probability", 30)
@@ -1200,31 +1200,31 @@ _video_jobs = {}
 _video_jobs_lock = threading.Lock()
 
 
-def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay: str, skip_overlay: bool):
-    """Background worker for video generation."""
+def _run_video_generation_job(job_id: str, count: int, competition: str, mode: str, text_overlay: str, skip_overlay: bool):
+    """Background worker for JesusAI video generation."""
     from app.services.video_generator import get_video_generator
-    
+
     try:
         with _video_jobs_lock:
             _video_jobs[job_id]["status"] = "running"
-            _video_jobs[job_id]["message"] = f"Generating {count} AI video(s) with Hailuo 2.3..."
-        
-        logger.info(f"[Job {job_id}] Starting AI video generation of {count} video(s)")
+            _video_jobs[job_id]["message"] = f"Generating {count} JesusAI video(s)..."
+
+        logger.info(f"[Job {job_id}] Starting JesusAI generation of {count} video(s) [mode={mode}]")
         generator = get_video_generator()
-        
+
         import concurrent.futures
         results = []
-        
+
         def _generate_single(i):
-            logger.info(f"[Job {job_id}] Thread {i+1}/{count}: Generating AI video...")
-            # Slight stagger
+            logger.info(f"[Job {job_id}] Thread {i+1}/{count}: Generating JesusAI video...")
             import time
-            time.sleep(i * 1.5)
+            time.sleep(i * 1.5)  # slight stagger to avoid rate-limit bursts
             try:
-                return generator.generate_teamwork_video(
-                    style_hint=style if style else None,
+                return generator.generate_jesusai_video(
+                    competition=competition if competition else None,
+                    mode=mode or "realistic",
                     text_overlay=text_overlay if text_overlay else None,
-                    skip_overlay=skip_overlay
+                    skip_overlay=skip_overlay,
                 )
             except Exception as e:
                 logger.error(f"[Job {job_id}] Thread {i+1} crashed: {e}")
@@ -1272,62 +1272,74 @@ def _run_video_generation_job(job_id: str, count: int, style: str, text_overlay:
 
 
 @router.post("/videos/generate")
-async def generate_teamwork_video(data: dict):
+async def generate_video(data: dict):
     """
-    Start video generation job using FREE stock footage (Pexels).
-    
-    Pipeline: Pexels stock clip → FFmpeg crop → text overlay → sound → strip metadata
-    Cost: $0.00 per video
-    
+    Start a single JesusAI video generation job.
+
+    Pipeline: Nano Banana Pro 2K -> Kling 2.6 -> FFmpeg overlay/sound/strip
+    Cost: ~$0.22 per video
+
+    Body:
+      competition: name match like "chess", "swimming" (optional, random if absent)
+      mode: "realistic" (default) or "cartoon"
+      text_overlay: custom overlay text (optional)
+      skip_overlay: skip text overlay step (default false)
+
     Returns a job_id to poll with /videos/job/{job_id}
     """
-    style = data.get("style", None)
+    competition = data.get("competition") or data.get("style")
+    mode = data.get("mode", "realistic")
     text_overlay = data.get("text_overlay", None)
     skip_overlay = data.get("skip_overlay", False)
-    
+
     job_id = str(uuid.uuid4())[:8]
-    
+
     with _video_jobs_lock:
         _video_jobs[job_id] = {
             "status": "queued",
-            "message": "Starting video generation...",
+            "message": "Starting JesusAI video generation...",
             "created_at": datetime.utcnow().isoformat(),
             "count": 1,
             "results": [],
             "total_cost_usd": 0,
             "successful": 0,
-            "failed": 0
+            "failed": 0,
         }
-    
-    # Run in background thread (not blocking)
+
     thread = threading.Thread(
         target=_run_video_generation_job,
-        args=(job_id, 1, style, text_overlay, skip_overlay),
-        daemon=True
+        args=(job_id, 1, competition, mode, text_overlay, skip_overlay),
+        daemon=True,
     )
     thread.start()
-    
+
     return {
         "success": True,
         "job_id": job_id,
-        "message": "Video generation started. Poll /videos/job/{job_id} for status."
+        "message": "Video generation started. Poll /videos/job/{job_id} for status.",
     }
 
 
 @router.post("/videos/batch")
 async def generate_video_batch(data: dict):
     """
-    Start batch video generation job (returns immediately).
-    
+    Start batch JesusAI video generation.
+
+    Body:
+      count: 1-20 (default 5)
+      competition: name match (optional, random per video if absent)
+      mode: "realistic" or "cartoon"
+      skip_overlay: bool
+
     Returns a job_id to poll with /videos/job/{job_id}
     """
     count = min(data.get("count", 5), 20)
-    styles = data.get("styles", None)
+    competition = data.get("competition") or (data.get("styles", [None])[0] if data.get("styles") else None)
+    mode = data.get("mode", "realistic")
     skip_overlay = data.get("skip_overlay", False)
-    
-    style = styles[0] if styles and len(styles) > 0 else None
+
     job_id = str(uuid.uuid4())[:8]
-    
+
     with _video_jobs_lock:
         _video_jobs[job_id] = {
             "status": "queued",
@@ -1337,20 +1349,20 @@ async def generate_video_batch(data: dict):
             "results": [],
             "total_cost_usd": 0,
             "successful": 0,
-            "failed": 0
+            "failed": 0,
         }
-    
+
     thread = threading.Thread(
         target=_run_video_generation_job,
-        args=(job_id, count, style, None, skip_overlay),
-        daemon=True
+        args=(job_id, count, competition, mode, None, skip_overlay),
+        daemon=True,
     )
     thread.start()
-    
+
     return {
         "success": True,
         "job_id": job_id,
-        "message": f"Batch generation of {count} videos started. Poll /videos/job/{job_id} for status."
+        "message": f"Batch generation of {count} videos started. Poll /videos/job/{job_id} for status.",
     }
 
 
@@ -1361,6 +1373,102 @@ async def get_video_job_status(job_id: str):
         if job_id not in _video_jobs:
             raise HTTPException(status_code=404, detail="Job not found")
         return _video_jobs[job_id]
+
+
+@router.get("/sounds/list", tags=["Sounds"])
+async def list_sounds():
+    """List all sound files available for video generation (assets/sounds/)."""
+    from pathlib import Path
+
+    sounds_dir = Path(__file__).parent.parent.parent / "assets" / "sounds"
+    sounds_dir.mkdir(parents=True, exist_ok=True)
+
+    items = []
+    for ext in ("*.mp3", "*.wav", "*.m4a", "*.ogg"):
+        for f in sounds_dir.rglob(ext):
+            try:
+                rel = f.relative_to(sounds_dir).as_posix()
+            except ValueError:
+                rel = f.name
+            stat = f.stat()
+            items.append({
+                "filename": f.name,
+                "path": rel,
+                "size_kb": round(stat.st_size / 1024, 1),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+    items.sort(key=lambda x: x["modified_at"], reverse=True)
+    return {"count": len(items), "sounds": items}
+
+
+@router.post("/sounds/upload", tags=["Sounds"])
+async def upload_sound(file: UploadFile = File(...)):
+    """Upload a sound file (mp3/wav/m4a/ogg) to assets/sounds/trending/."""
+    from pathlib import Path
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename")
+
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in (".mp3", ".wav", ".m4a", ".ogg"):
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {suffix}")
+
+    sounds_dir = Path(__file__).parent.parent.parent / "assets" / "sounds" / "trending"
+    sounds_dir.mkdir(parents=True, exist_ok=True)
+
+    # Sanitize filename — strip path components, allow only safe chars
+    safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in Path(file.filename).name)
+    target = sounds_dir / safe_name
+    contents = await file.read()
+    target.write_bytes(contents)
+    logger.info(f"Sound uploaded: {safe_name} ({len(contents)} bytes)")
+
+    return {
+        "success": True,
+        "filename": safe_name,
+        "size_kb": round(len(contents) / 1024, 1),
+    }
+
+
+@router.delete("/sounds/{filename}", tags=["Sounds"])
+async def delete_sound(filename: str):
+    """Delete a sound file."""
+    from pathlib import Path
+
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    sounds_dir = Path(__file__).parent.parent.parent / "assets" / "sounds"
+    # Search recursively for the file
+    matches = list(sounds_dir.rglob(filename))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Sound not found")
+
+    target = matches[0]
+    if target.is_file():
+        target.unlink()
+        return {"success": True, "filename": filename}
+    raise HTTPException(status_code=400, detail="Not a file")
+
+
+@router.get("/sounds/download/{filename}", tags=["Sounds"])
+async def download_sound(filename: str):
+    """Stream a sound file for preview/playback."""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    sounds_dir = Path(__file__).parent.parent.parent / "assets" / "sounds"
+    matches = list(sounds_dir.rglob(filename))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Sound not found")
+
+    target = matches[0]
+    media_map = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".m4a": "audio/mp4", ".ogg": "audio/ogg"}
+    media_type = media_map.get(target.suffix.lower(), "application/octet-stream")
+    return FileResponse(path=target, media_type=media_type, filename=filename)
 
 
 @router.get("/videos/list")
@@ -1374,14 +1482,16 @@ async def list_generated_videos():
     
     videos = []
     if video_dir.exists():
-        for video_file in video_dir.glob("teamwork_*.mp4"):
-            stat = video_file.stat()
-            videos.append({
-                "filename": video_file.name,
-                "path": str(video_file),
-                "size_mb": round(stat.st_size / (1024 * 1024), 2),
-                "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat()
-            })
+        # Match both new (jesusai_*.mp4) and legacy (teamwork_*.mp4) files
+        for pattern in ("jesusai_*.mp4", "teamwork_*.mp4"):
+            for video_file in video_dir.glob(pattern):
+                stat = video_file.stat()
+                videos.append({
+                    "filename": video_file.name,
+                    "path": str(video_file),
+                    "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                    "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                })
     
     # Sort by newest first
     videos.sort(key=lambda x: x["created_at"], reverse=True)
@@ -1698,7 +1808,7 @@ async def post_videos_to_tiktok(data: dict):
     video_filenames = data.get("videos", [])
     phone_ids = data.get("phone_ids", [])
     caption = data.get("caption", "")
-    hashtags = data.get("hashtags", "#teamwork #teamworktrend #teamworkchallenge")
+    hashtags = data.get("hashtags", "#jesus #jesussaves #jesuslovesyou #fyp #foryou #christian")
     auto_start = data.get("auto_start", True)
     auto_stop = data.get("auto_stop", True)
     auto_delete = data.get("auto_delete", False)

@@ -1,7 +1,8 @@
 """
-TikTok Automation Dashboard v2.0
-================================
-Streamlit dashboard with modern design, pipeline management, and account scheduling.
+JesusAI Growth Dashboard
+========================
+Streamlit dashboard for the JesusAI TikTok account-growth pipeline.
+TAP method scheduler + Nano Banana Pro 2K + Kling 2.6 video generation.
 """
 
 import streamlit as st
@@ -17,133 +18,213 @@ from datetime import datetime, timedelta
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000/api")
 
 st.set_page_config(
-    page_title="TikTok Automation",
-    page_icon="🚀",
+    page_title="JesusAI Growth",
+    page_icon="🙏",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 
 # ===========================
-# Custom CSS — Modern Dark Theme
+# JesusAI theme — deep navy + gold halo accent
 # ===========================
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    .stApp { font-family: 'Inter', sans-serif; }
-    
-    /* Sidebar - bright text for readability */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap');
+
+    :root {
+        --jas-bg-deep: #0a0a1a;
+        --jas-bg-card: #14142b;
+        --jas-bg-card-hi: #1c1c3a;
+        --jas-gold: #d4a64a;
+        --jas-gold-hi: #f0c674;
+        --jas-gold-soft: rgba(212, 166, 74, 0.15);
+        --jas-text: #f3f0e8;
+        --jas-text-dim: #a8a4b8;
+        --jas-text-muted: #6f6c80;
+    }
+
+    .stApp {
+        font-family: 'Inter', sans-serif;
+        background: radial-gradient(ellipse at top, #15152e 0%, var(--jas-bg-deep) 60%) !important;
+        color: var(--jas-text);
+    }
+
+    /* Sidebar — deep purple/navy with gold accents */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #0f0f23 0%, #1a1a3e 100%);
+        background: linear-gradient(180deg, #0a0a1a 0%, #1a1330 100%);
+        border-right: 1px solid var(--jas-gold-soft);
     }
     [data-testid="stSidebar"] .stMarkdown h1,
     [data-testid="stSidebar"] .stMarkdown h2,
-    [data-testid="stSidebar"] .stMarkdown h3,
+    [data-testid="stSidebar"] .stMarkdown h3 {
+        color: var(--jas-gold-hi) !important;
+        font-family: 'Cinzel', serif;
+        letter-spacing: 1.5px;
+    }
     [data-testid="stSidebar"] .stMarkdown p,
     [data-testid="stSidebar"] .stMarkdown span,
     [data-testid="stSidebar"] .stMarkdown div {
-        color: #e0e0ff !important;
+        color: var(--jas-text) !important;
     }
-    
-    /* Sidebar radio buttons - BRIGHT white text */
     [data-testid="stSidebar"] .stRadio label {
-        color: #ffffff !important;
-        font-size: 1.05rem !important;
+        color: var(--jas-text) !important;
+        font-size: 1.02rem !important;
         font-weight: 500 !important;
     }
     [data-testid="stSidebar"] .stRadio label p,
     [data-testid="stSidebar"] .stRadio label span,
     [data-testid="stSidebar"] .stRadio label div {
-        color: #ffffff !important;
-        font-size: 1.05rem !important;
-        font-weight: 500 !important;
+        color: var(--jas-text) !important;
     }
     [data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {
-        background: rgba(255, 255, 255, 0.08);
-        border-radius: 8px;
+        background: var(--jas-gold-soft);
+        border-radius: 10px;
     }
-    
-    /* Sidebar caption text */
     [data-testid="stSidebar"] .stCaption,
     [data-testid="stSidebar"] small,
     [data-testid="stSidebar"] .stMarkdown small {
-        color: #a0a0d0 !important;
+        color: var(--jas-text-dim) !important;
     }
-    
+
+    /* Headings — Cinzel for the brand feel */
+    h1, h2 { font-family: 'Cinzel', serif; letter-spacing: 1px; color: var(--jas-gold-hi); }
+    h3, h4 { color: var(--jas-text); }
+
     /* Cards */
     .metric-card {
-        background: linear-gradient(135deg, #1e1e3f 0%, #2a2a5a 100%);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 16px;
+        background: linear-gradient(135deg, var(--jas-bg-card) 0%, var(--jas-bg-card-hi) 100%);
+        border: 1px solid var(--jas-gold-soft);
+        border-radius: 18px;
         padding: 20px 24px;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 24px rgba(0,0,0,0.25);
     }
     .metric-card h3 {
-        color: #a0a0c0;
-        font-size: 0.85rem;
-        font-weight: 500;
+        color: var(--jas-text-dim);
+        font-size: 0.78rem;
+        font-weight: 600;
         margin: 0 0 8px 0;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 1.2px;
+        font-family: 'Inter', sans-serif;
     }
     .metric-card .value {
-        color: #ffffff;
-        font-size: 2rem;
-        font-weight: 700;
+        color: var(--jas-gold-hi);
+        font-size: 2.1rem;
+        font-weight: 800;
         line-height: 1.1;
+        font-family: 'Cinzel', serif;
     }
     .metric-card .sub {
-        color: #8080b0;
-        font-size: 0.8rem;
-        margin-top: 4px;
+        color: var(--jas-text-muted);
+        font-size: 0.78rem;
+        margin-top: 6px;
     }
-    
+
     /* Status badges */
     .badge {
         display: inline-block;
         padding: 4px 12px;
         border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 600;
+        font-size: 0.72rem;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.3px;
+        letter-spacing: 0.5px;
     }
-    .badge-green { background: rgba(76, 175, 80, 0.2); color: #66bb6a; }
-    .badge-yellow { background: rgba(255, 193, 7, 0.2); color: #ffd54f; }
-    .badge-red { background: rgba(244, 67, 54, 0.2); color: #ef5350; }
-    .badge-blue { background: rgba(33, 150, 243, 0.2); color: #42a5f5; }
-    .badge-gray { background: rgba(158, 158, 158, 0.2); color: #bdbdbd; }
-    
+    .badge-green { background: rgba(76, 175, 80, 0.18); color: #7fd684; }
+    .badge-yellow { background: var(--jas-gold-soft); color: var(--jas-gold-hi); }
+    .badge-red { background: rgba(244, 67, 54, 0.18); color: #ff7872; }
+    .badge-blue { background: rgba(120, 150, 220, 0.18); color: #9ab2dc; }
+    .badge-gray { background: rgba(158, 158, 158, 0.15); color: var(--jas-text-dim); }
+
     /* Log entry */
     .log-entry {
         display: flex;
         align-items: center;
-        padding: 10px 16px;
-        border-radius: 10px;
+        padding: 11px 16px;
+        border-radius: 12px;
         margin-bottom: 6px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(212, 166, 74, 0.06);
+        transition: background 0.15s ease;
     }
-    
+    .log-entry:hover {
+        background: var(--jas-gold-soft);
+    }
+
+    /* Buttons — gold accent */
+    .stButton > button {
+        border-radius: 12px !important;
+        border: 1px solid var(--jas-gold-soft) !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease !important;
+    }
+    .stButton > button:hover {
+        border-color: var(--jas-gold) !important;
+        box-shadow: 0 0 0 3px var(--jas-gold-soft);
+    }
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, var(--jas-gold) 0%, var(--jas-gold-hi) 100%) !important;
+        color: #1a1330 !important;
+        border: none !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        filter: brightness(1.1);
+    }
+
+    /* Inputs */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input, .stSelectbox > div > div {
+        background: var(--jas-bg-card) !important;
+        border-color: var(--jas-gold-soft) !important;
+        color: var(--jas-text) !important;
+    }
+
+    /* Hide streamlit chrome */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    header { visibility: hidden; }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 4px;
+        border-bottom: 1px solid var(--jas-gold-soft);
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 10px 10px 0 0;
+        font-weight: 600;
+        color: var(--jas-text-dim) !important;
+    }
+    .stTabs [aria-selected="true"] {
+        color: var(--jas-gold-hi) !important;
+        border-bottom: 2px solid var(--jas-gold) !important;
+    }
+
     /* Section header */
     .section-header {
-        color: #e0e0ff;
+        color: var(--jas-gold-hi);
         font-size: 1.3rem;
         font-weight: 700;
         margin: 24px 0 16px 0;
         padding-bottom: 8px;
-        border-bottom: 2px solid rgba(100, 100, 255, 0.2);
+        border-bottom: 1px solid var(--jas-gold-soft);
+        font-family: 'Cinzel', serif;
+        letter-spacing: 1px;
     }
-    
-    /* Hide streamlit branding */
-    #MainMenu { visibility: hidden; }
-    footer { visibility: hidden; }
-    
-    /* Tab styling */
-    .stTabs [data-baseweb="tab-list"] { gap: 4px; }
-    .stTabs [data-baseweb="tab"] { border-radius: 10px 10px 0 0; font-weight: 500; }
+
+    /* Brand banner in sidebar */
+    .jas-brand {
+        background: linear-gradient(135deg, var(--jas-gold) 0%, var(--jas-gold-hi) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-family: 'Cinzel', serif;
+        font-weight: 800;
+        font-size: 1.6rem;
+        letter-spacing: 2px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -213,18 +294,26 @@ def format_time_ago(iso_str):
 # Sidebar Navigation
 # ===========================
 
-st.sidebar.markdown("# 🚀 TikTok Automation")
+st.sidebar.markdown("<div class='jas-brand'>🙏 JESUSAI</div>", unsafe_allow_html=True)
+st.sidebar.caption("TAP-method TikTok account growth")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Navigation",
-    ["📊 Dashboard", "⚡ Pipeline", "👤 Accounts", "🎬 Videos", "📱 Phones"],
-    label_visibility="collapsed"
+    ["📊 Dashboard", "⚡ Pipeline", "👤 Accounts", "🎬 Videos", "🎵 Sounds", "📱 Phones"],
+    label_visibility="collapsed",
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"<small style='color: #a0a0d0;'>v2.0.0 | <a href='{API_BASE_URL.replace('/api', '')}' style='color: #9090ff;'>API</a></small>", unsafe_allow_html=True)
-st.sidebar.markdown("<small style='color: #8080b0;'>Built for automation 🤖</small>", unsafe_allow_html=True)
+st.sidebar.markdown(
+    f"<small style='color: #a8a4b8;'>v3.0 · TAP method · <a href='{API_BASE_URL.replace('/api', '')}' "
+    f"style='color: #d4a64a;'>API</a></small>",
+    unsafe_allow_html=True,
+)
+st.sidebar.markdown(
+    "<small style='color: #6f6c80;'>Jesus vs Devil · Nano Banana Pro 2K + Kling 2.6</small>",
+    unsafe_allow_html=True,
+)
 
 
 # ===========================
@@ -858,24 +947,40 @@ elif page == "🎬 Videos":
     tab1, tab2, tab3 = st.tabs(["🤖 AI Generate", "📚 Video Library", "📤 Post to TikTok"])
     
     with tab1:
-        st.markdown("### 🤖 Generate Teamwork Videos")
-        
+        st.markdown("### 🤖 Generate JesusAI Videos")
+        st.caption("Jesus vs Devil competitions · Nano Banana Pro 2K → Kling 2.6 · ~$0.22/video")
+
+        competitions = [
+            "Random",
+            "Arm Wrestling", "Tug of War", "Chess", "Jogging",
+            "Swimming", "Running", "Cycling", "Kayak Racing",
+            "Horseback Riding", "Rock Climbing",
+        ]
+
         with st.form("generate_video"):
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
-                video_count = st.number_input("Number of Videos", min_value=1, max_value=20, value=3)
+                video_count = st.number_input("Videos", min_value=1, max_value=20, value=3)
             with col2:
-                style_hint = st.selectbox("Style", ["nature", "beach", "city", "sunset", "mountains", "forest", "ocean"])
+                competition = st.selectbox("Competition", competitions)
             with col3:
-                skip_overlay = st.checkbox("Skip text overlay", value=False)
-            
-            if st.form_submit_button("🎬 Generate Videos", use_container_width=True, type="primary"):
-                with st.spinner(f"Generating {video_count} videos..."):
-                    result = api_post("/videos/generate", {
-                        "count": video_count, "style_hint": style_hint, "skip_overlay": skip_overlay
-                    })
-                    if result:
-                        st.success(f"Video generation started! Job ID: {result.get('job_id')}")
+                mode = st.selectbox("Mode", ["realistic", "cartoon"])
+            with col4:
+                skip_overlay = st.checkbox("Skip overlay", value=False)
+
+            if st.form_submit_button("✨ Generate", use_container_width=True, type="primary"):
+                payload = {
+                    "count": video_count,
+                    "mode": mode,
+                    "skip_overlay": skip_overlay,
+                }
+                if competition != "Random":
+                    payload["competition"] = competition
+                endpoint = "/videos/batch" if video_count > 1 else "/videos/generate"
+                with st.spinner(f"Queuing {video_count} JesusAI video(s)..."):
+                    result = api_post(endpoint, payload)
+                    if result and result.get("job_id"):
+                        st.success(f"Generation started — Job ID: `{result['job_id']}`")
                     else:
                         st.error("Failed to start video generation")
     
@@ -927,8 +1032,10 @@ elif page == "🎬 Videos":
                 col1, col2 = st.columns(2)
                 with col1:
                     caption = st.text_input("Caption", value="")
-                    hashtags = st.text_input("Hashtags",
-                        value="#teamwork #teamworktrend #teamworkchallenge #teamworkmakesthedream #letsgo")
+                    hashtags = st.text_input(
+                        "Hashtags",
+                        value="#jesus #jesussaves #jesuslovesyou #fyp #foryou #christian",
+                    )
                 with col2:
                     auto_start = st.checkbox("Auto-start phones", value=True)
                     auto_stop = st.checkbox("Auto-stop phones after", value=True)
@@ -958,6 +1065,77 @@ elif page == "🎬 Videos":
                 st.warning("No phones available. Create phones in MultiLogin first.")
             if not videos or not videos.get("videos"):
                 st.warning("No videos available. Generate videos first.")
+
+
+# ===========================
+# PAGE: Sounds
+# ===========================
+
+elif page == "🎵 Sounds":
+    st.markdown("## 🎵 Sound Library")
+    st.caption("Sounds attached randomly to JesusAI videos. Drop in your trending TikTok audio here.")
+
+    upload_col, info_col = st.columns([2, 1])
+    with upload_col:
+        uploaded = st.file_uploader(
+            "Upload sound (mp3 / wav / m4a / ogg)",
+            type=["mp3", "wav", "m4a", "ogg"],
+            accept_multiple_files=False,
+        )
+        if uploaded is not None:
+            files = {"file": (uploaded.name, uploaded.getvalue(), uploaded.type or "audio/mpeg")}
+            try:
+                resp = requests.post(f"{API_BASE_URL}/sounds/upload", files=files, timeout=60)
+                if resp.status_code == 200:
+                    j = resp.json()
+                    st.success(f"Uploaded `{j['filename']}` ({j['size_kb']} KB)")
+                    st.rerun()
+                else:
+                    st.error(f"Upload failed: {resp.status_code} {resp.text[:200]}")
+            except Exception as e:
+                st.error(f"Upload error: {e}")
+
+    with info_col:
+        st.markdown(
+            """
+            <div class='metric-card' style='padding: 14px; font-size: 0.85rem;'>
+              <div style='color: var(--jas-gold-hi); font-weight: 600; margin-bottom: 6px;'>How it works</div>
+              <div style='color: var(--jas-text-dim);'>
+                Each generated video gets a random sound from this library, muxed in by FFmpeg.
+                Drop in trending TikTok audio for organic-feeling posts.
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+    st.markdown("### Library")
+
+    sounds = api_get("/sounds/list")
+    if sounds and sounds.get("sounds"):
+        st.markdown(f"**{sounds['count']} sound(s) available**")
+        for s in sounds["sounds"]:
+            cols = st.columns([3, 2, 1, 1])
+            with cols[0]:
+                st.markdown(f"🎵 **{s['filename']}**")
+                st.caption(s.get("path", ""))
+            with cols[1]:
+                st.caption(f"{s.get('size_kb', 0)} KB · modified {s.get('modified_at', '')[:16]}")
+            with cols[2]:
+                if st.button("▶️", key=f"play_{s['filename']}", help="Preview"):
+                    st.session_state[f"sound_play_{s['filename']}"] = not st.session_state.get(
+                        f"sound_play_{s['filename']}", False,
+                    )
+            with cols[3]:
+                if st.button("🗑️", key=f"sound_del_{s['filename']}", help="Delete"):
+                    api_delete(f"/sounds/{s['filename']}")
+                    st.rerun()
+
+            if st.session_state.get(f"sound_play_{s['filename']}", False):
+                st.audio(f"{API_BASE_URL}/sounds/download/{s['filename']}")
+    else:
+        st.info("No sounds in library yet. Upload an mp3 above to get started.")
 
 
 # ===========================
@@ -1017,9 +1195,9 @@ elif page == "📱 Phones":
                 with col5:
                     if st.button("🔥", key=f"warmup_{phone_id}", help="Warmup"):
                         api_post("/geelark/warmup/run", {
-                            "phone_id": phone_id, "duration_minutes": 20,
-                            "action": "search video",
-                            "keywords": ["teamwork trend", "teamwork challenge"]
+                            "phone_id": phone_id, "duration_minutes": 10,
+                            "action": "browse video",
+                            "keywords": ["jesus", "jesus saves", "christian"],
                         })
                         st.success("Warmup started!")
                 
