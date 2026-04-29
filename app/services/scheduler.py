@@ -354,6 +354,7 @@ class AutomationScheduler:
                         enable_likes=en_likes,
                         enable_follow_back=en_follow,
                         like_probability=like_chance,
+                        comment_chance=comment_chance,  # TAP-scaled, was hardcoded 15
                     )
                 except Exception as e:
                     logger.error(f"Warmup task chain submit failed: {e}")
@@ -605,10 +606,12 @@ class AutomationScheduler:
                     f"Only {len(videos_to_use)}/{total_videos_needed} videos available — partial post"
                 )
 
-            # Build flat assignment: round-robin through accounts by their slot count
+            # Build flat assignment: position i in assignment_phones receives videos_to_use[i].
+            # Phone with N posts in this slot appears N times — paired 1-to-1 with videos.
             assignment_phones: List[str] = []
             for phone_id, n, _name in schedule_assignments:
                 assignment_phones.extend([phone_id] * n)
+            # Truncate to actual video count if we're short
             assignment_phones = assignment_phones[:len(videos_to_use)]
 
             start_time = time.time()
@@ -616,13 +619,13 @@ class AutomationScheduler:
                 f"{internal_base}/api/videos/post/batch",
                 json={
                     "videos": videos_to_use,
-                    "phone_ids": list(set(assignment_phones)),  # unique phones
+                    "phone_ids": assignment_phones,  # multiset — same length as videos
                     "caption": "",
                     "hashtags": "#jesus #jesussaves #jesuslovesyou #fyp #foryou #christian",
                     "auto_start": True,
                     "auto_stop": True,
                     "auto_delete": config["auto_delete"],
-                    "distribute_mode": "round_robin",
+                    "distribute_mode": "one_to_one",  # respects per-phone count
                 },
                 timeout=30,
             )

@@ -1411,7 +1411,11 @@ async def list_sounds():
 
 @router.post("/sounds/upload", tags=["Sounds"])
 async def upload_sound(file: UploadFile = File(...)):
-    """Upload a sound file (mp3/wav/m4a/ogg) to assets/sounds/trending/."""
+    """Upload a sound file (mp3/wav/m4a/ogg) to assets/sounds/trending/.
+
+    Streams the upload to disk (no full-file buffer) and enforces a 25MB cap.
+    Rejects empty files.
+    """
     from pathlib import Path
 
     if not file.filename:
@@ -1427,14 +1431,38 @@ async def upload_sound(file: UploadFile = File(...)):
     # Sanitize filename — strip path components, allow only safe chars
     safe_name = "".join(c if c.isalnum() or c in "._- " else "_" for c in Path(file.filename).name)
     target = sounds_dir / safe_name
-    contents = await file.read()
-    target.write_bytes(contents)
-    logger.info(f"Sound uploaded: {safe_name} ({len(contents)} bytes)")
 
+    # Stream-write with a 25MB cap; abort + cleanup on overflow or empty file.
+    MAX_BYTES = 25 * 1024 * 1024
+    written = 0
+    chunk_size = 64 * 1024
+    try:
+        with target.open("wb") as out:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_BYTES:
+                    out.close()
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="File exceeds 25MB limit")
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}") from e
+
+    if written == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    logger.info(f"Sound uploaded: {safe_name} ({written} bytes)")
     return {
         "success": True,
         "filename": safe_name,
-        "size_kb": round(len(contents) / 1024, 1),
+        "size_kb": round(written / 1024, 1),
     }
 
 

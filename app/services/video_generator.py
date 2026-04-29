@@ -21,6 +21,7 @@ import logging
 import os
 import random
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -302,7 +303,12 @@ class VideoGenerator:
     generate_jesusai_video() so older callers keep working during transition.
     """
 
-    DEFAULT_VIDEO_MODEL = os.getenv("JESUSAI_VIDEO_MODEL", "kling")  # "kling" | "hailuo"
+    # Default to "hailuo" (Hailuo 2.3, $0.15/clip) — known-working integration.
+    # "kling" is supported but the kie.ai model slug ("kling/2-6-image-to-video")
+    # was inferred from the JesusAI handover and the pattern of other kie models;
+    # if your kie.ai account returns "Unknown model" set this to "hailuo" or
+    # verify the correct slug from kie.ai docs.
+    DEFAULT_VIDEO_MODEL = os.getenv("JESUSAI_VIDEO_MODEL", "hailuo")  # "hailuo" | "kling"
 
     def __init__(self, output_dir: Optional[str] = None):
         self.kie = get_kie_client()
@@ -319,6 +325,9 @@ class VideoGenerator:
         self.trending_sounds_dir.mkdir(parents=True, exist_ok=True)
 
         self._used_competitions: set = set()
+        # Lock guards _used_competitions for concurrent pick_competition calls
+        # (routes.py runs N video gens in parallel via ThreadPoolExecutor).
+        self._competitions_lock = threading.Lock()
 
         logger.info(
             f"JesusAI VideoGenerator initialized — video model: {self.DEFAULT_VIDEO_MODEL}, "
@@ -330,21 +339,26 @@ class VideoGenerator:
     # -------------------------------------------------------------------------
 
     def pick_competition(self, requested: Optional[str] = None) -> dict:
-        """Pick a competition by name match (substring) or random not-recently-used."""
+        """Pick a competition by name match (substring) or random not-recently-used.
+
+        Thread-safe: callers across the routes.py thread pool can hit this
+        concurrently, so we lock the read-modify-write of `_used_competitions`.
+        """
         if requested:
             req_lower = requested.lower()
             for comp in COMPETITIONS:
                 if req_lower in comp["name"].lower():
                     return comp
 
-        available_idx = [i for i in range(len(COMPETITIONS)) if i not in self._used_competitions]
-        if not available_idx:
-            self._used_competitions.clear()
-            available_idx = list(range(len(COMPETITIONS)))
+        with self._competitions_lock:
+            available_idx = [i for i in range(len(COMPETITIONS)) if i not in self._used_competitions]
+            if not available_idx:
+                self._used_competitions.clear()
+                available_idx = list(range(len(COMPETITIONS)))
 
-        idx = random.choice(available_idx)
-        self._used_competitions.add(idx)
-        return COMPETITIONS[idx]
+            idx = random.choice(available_idx)
+            self._used_competitions.add(idx)
+            return COMPETITIONS[idx]
 
     # -------------------------------------------------------------------------
     # FFmpeg helpers (kept from prior pipeline — proven, no JesusAI coupling)
