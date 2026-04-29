@@ -49,6 +49,15 @@ def get_phone_client():
         settings = get_settings()
         creds = settings.get_geelark_credentials()
         
+        # Diagnostic: log presence (not value) of each credential so we can
+        # tell from logs whether env vars are actually arriving.
+        logger.info(
+            f"GeeLark settings: method={creds['method']} "
+            f"token_set={bool(settings.geelark_app_token)} "
+            f"app_id_set={bool(settings.geelark_app_id)} "
+            f"api_key_set={bool(settings.geelark_api_key)}"
+        )
+
         if creds["method"] == "TOKEN":
             _phone_client = GeeLarkClient(
                 base_url=settings.geelark_api_base_url,
