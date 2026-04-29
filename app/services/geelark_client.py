@@ -1090,6 +1090,7 @@ class GeeLarkClient:
         enable_follow_back: bool = True,
         comment_prompt: str = "Short supportive Christian comment with emoji like 🙏 ❤️ — e.g. 'amen 🙏', 'jesus loves you ❤️', 'blessed 🙌', 'support back 🙏', 'f4f 🙏'",
         like_probability: int = 30,
+        comment_chance: int = 15,
         schedule_at: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -1163,7 +1164,7 @@ class GeeLarkClient:
                     "action": "browse video",
                     "duration": 10,  # 10 min of commenting
                     "commentPrompt": comment_prompt,
-                    "commentChance": 15  # 15% chance per video
+                    "commentChance": comment_chance,  # caller-controlled (TAP scaler)
                 }
                 
                 comment_response = self.add_task(

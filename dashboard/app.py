@@ -248,21 +248,32 @@ def _api_session():
     return s
 
 
+class _ApiError(Exception):
+    """Internal — raised on failed api_get so cache_data doesn't memoize None."""
+
+
 @st.cache_data(ttl=10, show_spinner=False)
+def _api_get_cached(endpoint):
+    """Cached fetch. Raises on failure so the bad response isn't memoized."""
+    resp = _api_session().get(f"{API_BASE_URL}{endpoint}", timeout=15)
+    if resp.status_code == 200:
+        return resp.json()
+    raise _ApiError(f"{resp.status_code}: {resp.text[:120]}")
+
+
 def api_get(endpoint):
+    """Public wrapper. Returns None on failure but does NOT cache the failure,
+    so a 1s API blip doesn't pin "no data" in the dashboard for 10s."""
     try:
-        resp = _api_session().get(f"{API_BASE_URL}{endpoint}", timeout=15)
-        if resp.status_code == 200:
-            return resp.json()
-        return None
-    except Exception:
+        return _api_get_cached(endpoint)
+    except (_ApiError, Exception):
         return None
 
 
 def _invalidate_cache():
     """Drop the api_get response cache after a mutation."""
     try:
-        api_get.clear()
+        _api_get_cached.clear()
     except Exception:
         pass
 

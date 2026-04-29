@@ -22,9 +22,10 @@ services:
       # Optional: Anthropic for dynamic prompt variation (falls back to JSON templates)
       - key: ANTHROPIC_API_KEY
         sync: false
-      # "kling" (default, ~$0.10 video) or "hailuo" (~$0.15 video)
+      # "hailuo" (default, ~$0.15 video, proven) or "kling" (~$0.10 video,
+      # cheaper but kie.ai model slug needs verification — see video_generator.py)
       - key: JESUSAI_VIDEO_MODEL
-        value: kling
+        value: hailuo
       # Max parallel video generation workers (Standard 2GB plan can handle 8+)
       - key: JESUSAI_MAX_PARALLEL_VIDEOS
         value: "8"
